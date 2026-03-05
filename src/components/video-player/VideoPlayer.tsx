@@ -970,8 +970,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               onPointerDown={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                const video = videoRef.current;
+                if (video && !video.paused) video.pause();
+                const startX = e.clientX;
+                const startTime = rangeMarker.inTime;
                 const onMove = (ev: PointerEvent) => {
-                  const t = getTimeFromClientX(ev.clientX);
+                  const track = trackRef.current;
+                  if (!track) return;
+                  const dx = ev.clientX - startX;
+                  const scale = ev.shiftKey ? 0.1 : 1;
+                  const dt = (dx * scale / track.getBoundingClientRect().width) * duration;
+                  const t = clamp(startTime + dt, 0, duration);
+                  if (video) video.currentTime = t;
                   onRangeMarkerDrag?.("in", t);
                 };
                 const onUp = () => {
@@ -981,7 +991,6 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 window.addEventListener("pointermove", onMove);
                 window.addEventListener("pointerup", onUp, { once: true });
               }}
-              title="In point"
             />
             <div
               className="absolute top-1/2 z-[15] h-5 w-2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-[#2d5a2d] bg-[#7cb87c] shadow"
@@ -989,8 +998,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               onPointerDown={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                const video = videoRef.current;
+                if (video && !video.paused) video.pause();
+                const startX = e.clientX;
+                const startTime = rangeMarker.outTime;
                 const onMove = (ev: PointerEvent) => {
-                  const t = getTimeFromClientX(ev.clientX);
+                  const track = trackRef.current;
+                  if (!track) return;
+                  const dx = ev.clientX - startX;
+                  const scale = ev.shiftKey ? 0.1 : 1;
+                  const dt = (dx * scale / track.getBoundingClientRect().width) * duration;
+                  const t = clamp(startTime + dt, 0, duration);
+                  if (video) video.currentTime = t;
                   onRangeMarkerDrag?.("out", t);
                 };
                 const onUp = () => {
@@ -1000,7 +1019,6 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 window.addEventListener("pointermove", onMove);
                 window.addEventListener("pointerup", onUp, { once: true });
               }}
-              title="Out point"
             />
           </>
         )}
@@ -1013,8 +1031,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             onPointerDown={(e) => {
               e.stopPropagation();
               e.preventDefault();
+              const video = videoRef.current;
+              if (video && !video.paused) video.pause();
+              const startX = e.clientX;
+              const startTime = editingMarker.timestampSeconds;
               const onMove = (ev: PointerEvent) => {
-                const t = getTimeFromClientX(ev.clientX);
+                const track = trackRef.current;
+                if (!track) return;
+                const dx = ev.clientX - startX;
+                const scale = ev.shiftKey ? 0.1 : 1;
+                const dt = (dx * scale / track.getBoundingClientRect().width) * duration;
+                const t = clamp(startTime + dt, 0, duration);
+                if (video) video.currentTime = t;
                 onEditingMarkerDrag?.(t);
               };
               const onUp = () => {
@@ -1024,7 +1052,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
               window.addEventListener("pointermove", onMove);
               window.addEventListener("pointerup", onUp, { once: true });
             }}
-            title={`Edit timestamp: ${formatTimestamp(editingMarker.timestampSeconds)}`}
+            title={`Edit timestamp: ${formatTimestamp(editingMarker.timestampSeconds)} — hold Shift for fine control`}
           />
         )}
 

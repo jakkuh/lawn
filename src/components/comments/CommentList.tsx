@@ -19,6 +19,9 @@ interface CommentListProps {
   currentUserClerkId?: string;
   onTimestampClick: (seconds: number) => void;
   onEditTimestamp?: (commentId: Id<"comments">, timestampSeconds: number) => void;
+  onEditingChange?: (editing: { commentId: Id<"comments">; timestamp: number; endTimestamp?: number } | null) => void;
+  externalEditTimestamp?: number | null;
+  externalEditRange?: { inTime: number; outTime: number } | null;
   highlightedCommentId?: Id<"comments">;
   canResolve?: boolean;
   onVisibleIdsChange?: (ids: Set<string>) => void;
@@ -30,6 +33,9 @@ export function CommentList({
   currentUserClerkId,
   onTimestampClick,
   onEditTimestamp,
+  onEditingChange,
+  externalEditTimestamp,
+  externalEditRange,
   highlightedCommentId,
   canResolve = false,
   onVisibleIdsChange,
@@ -161,6 +167,9 @@ export function CommentList({
                   currentUserClerkId={currentUserClerkId}
                   onTimestampClick={onTimestampClick}
                   onEditTimestamp={onEditTimestamp}
+                  onEditingChange={onEditingChange}
+                  externalEditTimestamp={externalEditTimestamp}
+                  externalEditRange={externalEditRange}
                   isHighlighted={highlightedCommentId === comment._id}
                   canResolve={canResolve}
                 />
@@ -174,6 +183,9 @@ export function CommentList({
                         currentUserClerkId={currentUserClerkId}
                         onTimestampClick={onTimestampClick}
                         onEditTimestamp={onEditTimestamp}
+                        onEditingChange={onEditingChange}
+                        externalEditTimestamp={externalEditTimestamp}
+                        externalEditRange={externalEditRange}
                         isHighlighted={highlightedCommentId === reply._id}
                         isReply
                         canResolve={canResolve}

@@ -85,6 +85,8 @@ export default function VideoPage() {
   const [isLoadingOriginalPlayback, setIsLoadingOriginalPlayback] = useState(false);
   const [preferredSource, setPreferredSource] = useState<"mux720" | "original" | null>(null);
   const [rangeMarker, setRangeMarker] = useState<{ inTime: number; outTime: number } | null>(null);
+  const [editingMarker, setEditingMarker] = useState<{ timestampSeconds: number } | null>(null);
+  const [editingCommentId, setEditingCommentId] = useState<Id<"comments"> | null>(null);
   const [visibleCommentIds, setVisibleCommentIds] = useState<Set<string>>(new Set());
   const [drawingMode, setDrawingMode] = useState(false);
   const [drawingData, setDrawingData] = useState<string | null>(null);
@@ -219,6 +221,26 @@ export default function VideoPage() {
       setHighlightedCommentId(undefined);
     },
     [playerRef, setHighlightedCommentId]
+  );
+
+  const handleEditingChange = useCallback(
+    (editing: { commentId: Id<"comments">; timestamp: number; endTimestamp?: number } | null) => {
+      if (editing) {
+        setEditingCommentId(editing.commentId);
+        if (editing.endTimestamp !== undefined) {
+          setRangeMarker({ inTime: editing.timestamp, outTime: editing.endTimestamp });
+          setEditingMarker(null);
+        } else {
+          setEditingMarker({ timestampSeconds: editing.timestamp });
+          setRangeMarker(null);
+        }
+      } else {
+        setEditingCommentId(null);
+        setEditingMarker(null);
+        setRangeMarker(null);
+      }
+    },
+    [],
   );
 
   const handleSaveTitle = async () => {
@@ -426,6 +448,10 @@ export default function VideoPage() {
                 downloadFilename={`${video.title}.mp4`}
                 onRequestDownload={requestDownload}
                 controlsBelow
+                editingMarker={editingMarker ?? undefined}
+                onEditingMarkerDrag={(time) => {
+                  setEditingMarker({ timestampSeconds: time });
+                }}
                 rangeMarker={rangeMarker ?? undefined}
                 onRangeMarkerDrag={(handle, time) => {
                   setRangeMarker((prev) => prev ? {
@@ -532,6 +558,9 @@ export default function VideoPage() {
               comments={commentsThreaded}
               currentUserClerkId={context?.userSubject}
               onTimestampClick={handleTimestampClick}
+              onEditingChange={handleEditingChange}
+              externalEditTimestamp={editingMarker?.timestampSeconds ?? null}
+              externalEditRange={editingCommentId ? rangeMarker : null}
               highlightedCommentId={highlightedCommentId}
               canResolve={canEdit}
               onVisibleIdsChange={setVisibleCommentIds}
@@ -544,7 +573,8 @@ export default function VideoPage() {
                 timestampSeconds={currentTime}
                 showTimestamp
                 variant="seamless"
-                onRangeChange={setRangeMarker}
+                onRangeChange={editingCommentId ? undefined : setRangeMarker}
+                externalRange={editingCommentId ? null : rangeMarker}
                 onDrawingRequest={() => setDrawingMode(true)}
                 drawingData={drawingData}
               />
@@ -583,6 +613,9 @@ export default function VideoPage() {
                 handleTimestampClick(time);
                 setMobileCommentsOpen(false);
               }}
+              onEditingChange={handleEditingChange}
+              externalEditTimestamp={editingMarker?.timestampSeconds ?? null}
+              externalEditRange={editingCommentId ? rangeMarker : null}
               highlightedCommentId={highlightedCommentId}
               canResolve={canEdit}
               onVisibleIdsChange={setVisibleCommentIds}
@@ -595,7 +628,8 @@ export default function VideoPage() {
                 timestampSeconds={currentTime}
                 showTimestamp
                 variant="seamless"
-                onRangeChange={setRangeMarker}
+                onRangeChange={editingCommentId ? undefined : setRangeMarker}
+                externalRange={editingCommentId ? null : rangeMarker}
                 onDrawingRequest={() => setDrawingMode(true)}
                 drawingData={drawingData}
               />

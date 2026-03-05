@@ -18,8 +18,39 @@ export function formatDuration(seconds: number): string {
 
 export function formatTimestamp(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${minutes}:${secs.toString().padStart(2, "0")}`;
+  const wholeSecs = Math.floor(seconds % 60);
+  const frac = seconds - Math.floor(seconds);
+  if (frac < 0.005) {
+    return `${minutes}:${wholeSecs.toString().padStart(2, "0")}`;
+  }
+  const centis = Math.round(frac * 100)
+    .toString()
+    .padStart(2, "0");
+  return `${minutes}:${wholeSecs.toString().padStart(2, "0")}.${centis}`;
+}
+
+export function formatTimestampInput(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const wholeSec = Math.floor(seconds % 60);
+  const frac = seconds - Math.floor(seconds);
+  const base = `${String(m).padStart(2, "0")}:${String(wholeSec).padStart(2, "0")}`;
+  if (frac < 0.005) return base;
+  return `${base}.${Math.round(frac * 100).toString().padStart(2, "0")}`;
+}
+
+export function parseTimestampInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(
+    /^(?:(\d+):)?(\d{1,2}):(\d{1,2})(?:\.(\d+))?$|^(\d+(?:\.\d+)?)$/,
+  );
+  if (!match) return null;
+  if (match[5] !== undefined) return parseFloat(match[5]);
+  const h = match[1] ? parseInt(match[1], 10) : 0;
+  const m = parseInt(match[2], 10);
+  const s = parseInt(match[3], 10);
+  const frac = match[4] ? parseFloat(`0.${match[4]}`) : 0;
+  return h * 3600 + m * 60 + s + frac;
 }
 
 export function formatBytes(bytes: number): string {

@@ -5,22 +5,8 @@ import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Id } from "../../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
-import { formatTimestamp } from "@/lib/utils";
+import { formatTimestamp, formatTimestampInput, parseTimestampInput } from "@/lib/utils";
 import { Send, X, Scissors, Pencil } from "lucide-react";
-
-function formatTimestampInput(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function parseTimestampInput(value: string): number | null {
-  const parts = value.split(":").map(Number);
-  if (parts.some(isNaN)) return null;
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return null;
-}
 
 interface CommentInputProps {
   videoId: Id<"videos">;
@@ -33,6 +19,7 @@ interface CommentInputProps {
   showTimestamp?: boolean;
   variant?: "default" | "seamless";
   onRangeChange?: (range: { inTime: number; outTime: number } | null) => void;
+  externalRange?: { inTime: number; outTime: number } | null;
   onDrawingRequest?: () => void;
   drawingData?: string | null;
 }
@@ -48,6 +35,7 @@ export function CommentInput({
   showTimestamp = false,
   variant = "default",
   onRangeChange,
+  externalRange,
   onDrawingRequest,
   drawingData,
 }: CommentInputProps) {
@@ -58,6 +46,13 @@ export function CommentInput({
   const [outTime, setOutTime] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const createComment = useMutation(api.comments.create);
+
+  useEffect(() => {
+    if (externalRange && rangeMode) {
+      setInTime(formatTimestampInput(externalRange.inTime));
+      setOutTime(formatTimestampInput(externalRange.outTime));
+    }
+  }, [externalRange, rangeMode]);
 
   const defaultPlaceholder = showTimestamp 
     ? `Comment at ${formatTimestamp(timestampSeconds)}...` 
@@ -188,16 +183,16 @@ export function CommentInput({
             type="text"
             value={inTime}
             onChange={(e) => handleInTimeChange(e.target.value)}
-            className="w-16 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 font-mono text-xs text-[#1a1a1a] focus:outline-none"
-            placeholder="mm:ss"
+            className="w-20 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 font-mono text-xs text-[#1a1a1a] focus:outline-none"
+            placeholder="mm:ss.ff"
           />
           <label className="font-mono text-[#888]">Out</label>
           <input
             type="text"
             value={outTime}
             onChange={(e) => handleOutTimeChange(e.target.value)}
-            className="w-16 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 font-mono text-xs text-[#1a1a1a] focus:outline-none"
-            placeholder="mm:ss"
+            className="w-20 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 font-mono text-xs text-[#1a1a1a] focus:outline-none"
+            placeholder="mm:ss.ff"
           />
         </div>
       )}

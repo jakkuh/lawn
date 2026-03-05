@@ -6,7 +6,7 @@ import { Id } from "../../../convex/_generated/dataModel";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { formatTimestamp, formatRelativeTime, getInitials, cn } from "@/lib/utils";
+import { formatTimestamp, formatTimestampInput, parseTimestampInput, formatRelativeTime, getInitials, cn } from "@/lib/utils";
 import { Check, MoreVertical, Trash2, Reply, Pencil } from "lucide-react";
 import {
   DropdownMenu,
@@ -16,20 +16,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useState, useRef, useEffect } from "react";
 import { CommentInput } from "./CommentInput";
-
-function parseTimestampInput(value: string): number | null {
-  const parts = value.split(":").map(Number);
-  if (parts.some(isNaN)) return null;
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  return null;
-}
-
-function formatTimestampInput(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
 
 interface Comment {
   _id: Id<"comments">;
@@ -51,6 +37,9 @@ interface CommentItemProps {
   currentUserClerkId?: string;
   onTimestampClick: (seconds: number) => void;
   onEditTimestamp?: (commentId: Id<"comments">, timestampSeconds: number) => void;
+  onEditingChange?: (editing: { commentId: Id<"comments">; timestamp: number; endTimestamp?: number } | null) => void;
+  externalEditTimestamp?: number | null;
+  externalEditRange?: { inTime: number; outTime: number } | null;
   isHighlighted?: boolean;
   isReply?: boolean;
   canResolve?: boolean;
@@ -61,6 +50,9 @@ export function CommentItem({
   currentUserClerkId,
   onTimestampClick,
   onEditTimestamp,
+  onEditingChange,
+  externalEditTimestamp,
+  externalEditRange,
   isHighlighted = false,
   isReply = false,
   canResolve = false,
@@ -69,12 +61,16 @@ export function CommentItem({
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(comment.text);
   const [editTimestamp, setEditTimestamp] = useState(formatTimestampInput(comment.timestampSeconds));
+  const [editEndTimestamp, setEditEndTimestamp] = useState(
+    comment.endTimestampSeconds !== undefined ? formatTimestampInput(comment.endTimestampSeconds) : "",
+  );
   const editTextRef = useRef<HTMLTextAreaElement>(null);
   const toggleResolved = useMutation(api.comments.toggleResolved);
   const deleteComment = useMutation(api.comments.remove);
   const updateComment = useMutation(api.comments.update);
 
   const isOwnComment = currentUserClerkId && comment.userClerkId === currentUserClerkId;
+  const isRange = comment.endTimestampSeconds !== undefined;
 
   useEffect(() => {
     if (isEditing && editTextRef.current) {
@@ -83,32 +79,57 @@ export function CommentItem({
     }
   }, [isEditing]);
 
+  useEffect(() => {
+    if (!isEditing) return;
+    if (isRange && externalEditRange) {
+      setEditTimestamp(formatTimestampInput(externalEditRange.inTime));
+      setEditEndTimestamp(formatTimestampInput(externalEditRange.outTime));
+    } else if (!isRange && externalEditTimestamp != null) {
+      setEditTimestamp(formatTimestampInput(externalEditTimestamp));
+    }
+  }, [isEditing, isRange, externalEditRange, externalEditTimestamp]);
+
   const handleStartEdit = () => {
     setEditText(comment.text);
     setEditTimestamp(formatTimestampInput(comment.timestampSeconds));
+    setEditEndTimestamp(
+      comment.endTimestampSeconds !== undefined ? formatTimestampInput(comment.endTimestampSeconds) : "",
+    );
     setIsEditing(true);
+    onEditingChange?.({
+      commentId: comment._id,
+      timestamp: comment.timestampSeconds,
+      ...(comment.endTimestampSeconds !== undefined ? { endTimestamp: comment.endTimestampSeconds } : {}),
+    });
   };
 
   const handleCancelEdit = () => {
     setIsEditing(false);
     setEditText(comment.text);
     setEditTimestamp(formatTimestampInput(comment.timestampSeconds));
+    setEditEndTimestamp(
+      comment.endTimestampSeconds !== undefined ? formatTimestampInput(comment.endTimestampSeconds) : "",
+    );
+    onEditingChange?.(null);
   };
 
   const handleSaveEdit = async () => {
     const trimmed = editText.trim();
     if (!trimmed) return;
     const parsedTs = parseTimestampInput(editTimestamp);
+    const parsedEnd = editEndTimestamp.trim() ? parseTimestampInput(editEndTimestamp) : null;
     try {
       await updateComment({
         commentId: comment._id,
         ...(trimmed !== comment.text ? { text: trimmed } : {}),
         ...(parsedTs !== null && parsedTs !== comment.timestampSeconds ? { timestampSeconds: parsedTs } : {}),
+        ...(parsedEnd !== null && parsedEnd !== comment.endTimestampSeconds ? { endTimestampSeconds: parsedEnd } : {}),
       });
       if (parsedTs !== null && parsedTs !== comment.timestampSeconds) {
         onEditTimestamp?.(comment._id, parsedTs);
       }
       setIsEditing(false);
+      onEditingChange?.(null);
     } catch (error) {
       console.error("Failed to update comment:", error);
     }
@@ -222,7 +243,7 @@ export function CommentItem({
                 rows={2}
               />
               <div className="flex items-center gap-2">
-                <label className="text-[11px] text-[#888] font-mono">@</label>
+                <label className="text-[11px] text-[#888] font-mono">{isRange ? "In" : "@"}</label>
                 <input
                   type="text"
                   value={editTimestamp}
@@ -231,9 +252,25 @@ export function CommentItem({
                     if (e.key === "Enter") { e.preventDefault(); void handleSaveEdit(); }
                     if (e.key === "Escape") handleCancelEdit();
                   }}
-                  className="w-16 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 text-xs font-mono text-[#1a1a1a] focus:outline-none"
-                  placeholder="mm:ss"
+                  className="w-20 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 text-xs font-mono text-[#1a1a1a] focus:outline-none"
+                  placeholder="mm:ss.ff"
                 />
+                {isRange && (
+                  <>
+                    <label className="text-[11px] text-[#888] font-mono">Out</label>
+                    <input
+                      type="text"
+                      value={editEndTimestamp}
+                      onChange={(e) => setEditEndTimestamp(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); void handleSaveEdit(); }
+                        if (e.key === "Escape") handleCancelEdit();
+                      }}
+                      className="w-20 border-2 border-[#1a1a1a] bg-[#f0f0e8] px-1.5 py-0.5 text-xs font-mono text-[#1a1a1a] focus:outline-none"
+                      placeholder="mm:ss.ff"
+                    />
+                  </>
+                )}
                 <div className="ml-auto flex gap-1.5">
                   <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={handleCancelEdit}>
                     Cancel
