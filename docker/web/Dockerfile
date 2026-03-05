@@ -18,5 +18,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/vite.config.ts ./vite.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/app ./app
 EXPOSE 5296
 CMD ["npx", "vite", "preview", "--port", "5296", "--host", "0.0.0.0"]
