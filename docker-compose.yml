@@ -35,6 +35,15 @@ services:
     image: node:22-bookworm-slim
     environment:
       - CLERK_JWT_ISSUER_DOMAIN=${CLERK_JWT_ISSUER_DOMAIN:-disabled}
+      - RAILWAY_ENDPOINT=${RAILWAY_ENDPOINT}
+      - RAILWAY_ACCESS_KEY_ID=${RAILWAY_ACCESS_KEY_ID}
+      - RAILWAY_SECRET_ACCESS_KEY=${RAILWAY_SECRET_ACCESS_KEY}
+      - RAILWAY_BUCKET_NAME=${RAILWAY_BUCKET_NAME:-jakkuh-lawn}
+      - RAILWAY_REGION=${RAILWAY_REGION:-auto}
+      - RAILWAY_PUBLIC_URL=${RAILWAY_PUBLIC_URL}
+      - R2_PUBLIC_URL=${R2_PUBLIC_URL}
+      - TRANSCODER_WEBHOOK_SECRET=${TRANSCODER_WEBHOOK_SECRET:-lawn-transcode-secret}
+      - SELF_HOSTED_TRANSCODER=${SELF_HOSTED_TRANSCODER:-true}
     volumes:
       - .:/app
       - push-node-modules:/app/node_modules

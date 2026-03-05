@@ -23,9 +23,22 @@ if [ ! -d "node_modules/convex" ]; then
   npm install --prefer-offline 2>&1 | tail -3
 fi
 
-# Convex requires all env vars referenced by auth.config.ts to be present.
-# Keep Clerk optional by defaulting to a disabled sentinel.
-npx convex env set CLERK_JWT_ISSUER_DOMAIN "${CLERK_JWT_ISSUER_DOMAIN:-disabled}" >/dev/null
+# Set Convex deployment env vars from container environment.
+# These are used by Convex functions at runtime (s3.ts, http.ts, auth.config.ts, etc.)
+set_env() { [ -n "$2" ] && npx convex env set "$1" "$2" >/dev/null 2>&1 || true; }
+
+set_env CLERK_JWT_ISSUER_DOMAIN "${CLERK_JWT_ISSUER_DOMAIN:-disabled}"
+set_env RAILWAY_ENDPOINT "$RAILWAY_ENDPOINT"
+set_env RAILWAY_ACCESS_KEY_ID "$RAILWAY_ACCESS_KEY_ID"
+set_env RAILWAY_SECRET_ACCESS_KEY "$RAILWAY_SECRET_ACCESS_KEY"
+set_env RAILWAY_BUCKET_NAME "${RAILWAY_BUCKET_NAME:-jakkuh-lawn}"
+set_env RAILWAY_REGION "${RAILWAY_REGION:-auto}"
+set_env RAILWAY_PUBLIC_URL "$RAILWAY_PUBLIC_URL"
+set_env R2_PUBLIC_URL "$R2_PUBLIC_URL"
+set_env TRANSCODER_WEBHOOK_SECRET "${TRANSCODER_WEBHOOK_SECRET:-lawn-transcode-secret}"
+set_env SELF_HOSTED_TRANSCODER "${SELF_HOSTED_TRANSCODER:-true}"
+
+echo "Convex env vars configured."
 
 # Push Convex functions
 npx convex dev --once
