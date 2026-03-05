@@ -99,8 +99,6 @@ jobs:
           platforms: linux/amd64
           build-args: |
             VITE_SELF_HOSTED=true
-            VITE_CONVEX_URL=${{ vars.VITE_CONVEX_URL || 'http://127.0.0.1:3210' }}
-            VITE_CONVEX_SITE_URL=${{ vars.VITE_CONVEX_SITE_URL || 'http://127.0.0.1:3211' }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 

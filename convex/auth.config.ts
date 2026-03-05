@@ -1,15 +1,27 @@
-const providers: Array<{ domain: string; applicationID: string }> = [];
+type Provider = { domain: string; applicationID: string };
 
-if (process.env.CONVEX_SITE_URL) {
+function readOptionalEnv(name: string): string | undefined {
+  const value = (process.env as Record<string, string | undefined>)[name];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "disabled") return undefined;
+  return trimmed;
+}
+
+const providers: Provider[] = [];
+
+const convexDomain = readOptionalEnv("CONVEX_SITE_URL");
+if (convexDomain) {
   providers.push({
-    domain: process.env.CONVEX_SITE_URL,
+    domain: convexDomain,
     applicationID: "convex",
   });
 }
 
-if (process.env.CLERK_JWT_ISSUER_DOMAIN) {
+const clerkDomain = readOptionalEnv("CLERK_JWT_ISSUER_DOMAIN");
+if (clerkDomain) {
   providers.push({
-    domain: process.env.CLERK_JWT_ISSUER_DOMAIN,
+    domain: clerkDomain,
     applicationID: "convex",
   });
 }

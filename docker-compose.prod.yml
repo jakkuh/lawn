@@ -33,6 +33,8 @@ services:
 
   convex-push:
     image: ghcr.io/${GITHUB_REPO:-lawn}/convex-push:latest
+    environment:
+      - CLERK_JWT_ISSUER_DOMAIN=${CLERK_JWT_ISSUER_DOMAIN:-disabled}
     volumes:
       - convex-init:/init:ro
     depends_on:

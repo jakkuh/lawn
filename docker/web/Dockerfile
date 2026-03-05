@@ -1,7 +1,7 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json ./
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm npm install --prefer-offline --no-audit --progress=false
 
 FROM deps AS builder
 COPY . .
@@ -13,9 +13,10 @@ RUN npx vite build
 
 FROM node:22-bookworm-slim
 WORKDIR /app
-COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
+COPY --from=builder /app/vite.config.ts ./vite.config.ts
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 EXPOSE 5296
 CMD ["npx", "vite", "preview", "--port", "5296", "--host", "0.0.0.0"]

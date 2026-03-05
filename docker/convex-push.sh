@@ -12,6 +12,8 @@ echo "Admin key loaded."
 
 export CONVEX_SELF_HOSTED_URL=http://backend:3210
 export CONVEX_SELF_HOSTED_ADMIN_KEY="$KEY"
+export CONVEX_TMPDIR=/app/.convex-tmp
+mkdir -p /app/.convex-tmp
 
 cd /app
 
@@ -20,6 +22,10 @@ if [ ! -d "node_modules/convex" ]; then
   echo "Installing dependencies..."
   npm install --prefer-offline 2>&1 | tail -3
 fi
+
+# Convex requires all env vars referenced by auth.config.ts to be present.
+# Keep Clerk optional by defaulting to a disabled sentinel.
+npx convex env set CLERK_JWT_ISSUER_DOMAIN "${CLERK_JWT_ISSUER_DOMAIN:-disabled}" >/dev/null
 
 # Push Convex functions
 npx convex dev --once
