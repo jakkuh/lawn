@@ -1,10 +1,13 @@
 "use node";
 
 import {
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
@@ -18,10 +21,12 @@ import {
   createPublicPlaybackId,
   getMuxAsset,
 } from "./mux";
-import { BUCKET_NAME, getS3Client } from "./s3";
+import { BUCKET_NAME, buildPublicContentUrl, getS3Client, getS3SigningClient } from "./s3";
 
 const GIBIBYTE = 1024 ** 3;
 const MAX_PRESIGNED_PUT_FILE_SIZE_BYTES = 5 * GIBIBYTE;
+const MAX_MULTIPART_FILE_SIZE_BYTES = 50 * GIBIBYTE;
+const MULTIPART_PART_SIZE = 50 * 1024 * 1024; // 50 MB
 const ALLOWED_UPLOAD_CONTENT_TYPES = new Set([
   "video/mp4",
   "video/quicktime",
@@ -82,10 +87,11 @@ async function buildSignedBucketObjectUrl(
     expiresIn?: number;
     filename?: string;
     contentType?: string;
+    forBrowser?: boolean;
   },
 ): Promise<string> {
   const normalizedKey = normalizeBucketKey(key);
-  const s3 = getS3Client();
+  const s3 = options?.forBrowser ? getS3SigningClient() : getS3Client();
   const filename = options?.filename;
   const command = new GetObjectCommand({
     Bucket: BUCKET_NAME,
@@ -157,6 +163,12 @@ async function requireVideoMemberAccess(
   }
 }
 
+function useTranscoder(): boolean {
+  return Boolean(
+    process.env.SELF_HOSTED_TRANSCODER || process.env.TRANSCODER_URL,
+  );
+}
+
 function buildPublicPlaybackSession(
   playbackId: string,
 ): { url: string; posterUrl: string } {
@@ -165,6 +177,20 @@ function buildPublicPlaybackSession(
     posterUrl: buildMuxThumbnailUrl(playbackId),
   };
 }
+
+function buildHlsPlaybackSession(
+  hlsKey: string,
+  thumbnailKey?: string | null,
+  thumbnailUrl?: string | null,
+): { url: string; posterUrl: string } {
+  return {
+    url: buildPublicContentUrl(hlsKey),
+    posterUrl: thumbnailKey
+      ? buildPublicContentUrl(thumbnailKey)
+      : (thumbnailUrl ?? ""),
+  };
+}
+
 
 async function ensurePublicPlaybackId(
   ctx: ActionCtx,
@@ -219,7 +245,7 @@ export const getUploadUrl = action({
       contentType: args.contentType,
     });
 
-    const s3 = getS3Client();
+    const s3 = getS3SigningClient();
     const ext = getExtensionFromKey(args.filename);
     const key = `videos/${args.videoId}/${Date.now()}.${ext}`;
     const command = new PutObjectCommand({
@@ -237,6 +263,96 @@ export const getUploadUrl = action({
     });
 
     return { url, uploadId: key };
+  },
+});
+
+export const initiateMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    filename: v.string(),
+    fileSize: v.number(),
+    contentType: v.string(),
+  },
+  returns: v.object({
+    key: v.string(),
+    s3UploadId: v.string(),
+    partUrls: v.array(v.string()),
+    partSize: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+
+    const normalizedContentType = normalizeContentType(args.contentType);
+    if (!isAllowedUploadContentType(normalizedContentType)) {
+      throw new Error("Unsupported video format. Allowed: mp4, mov, webm, mkv.");
+    }
+    if (!Number.isFinite(args.fileSize) || args.fileSize <= 0) {
+      throw new Error("Video file size must be greater than zero.");
+    }
+    if (args.fileSize > MAX_MULTIPART_FILE_SIZE_BYTES) {
+      throw new Error("Video file exceeds the 50 GB maximum.");
+    }
+
+    const s3 = getS3SigningClient();
+    const ext = getExtensionFromKey(args.filename);
+    const key = `videos/${args.videoId}/${Date.now()}.${ext}`;
+
+    const { UploadId } = await s3.send(
+      new CreateMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        ContentType: normalizedContentType,
+      }),
+    );
+
+    if (!UploadId) throw new Error("Failed to initiate multipart upload.");
+
+    const totalParts = Math.ceil(args.fileSize / MULTIPART_PART_SIZE);
+    const partUrls: string[] = [];
+    for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+      const command = new UploadPartCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        UploadId,
+        PartNumber: partNumber,
+      });
+      const url = await getSignedUrl(s3, command, { expiresIn: 86400 });
+      partUrls.push(url);
+    }
+
+    await ctx.runMutation(internal.videos.setUploadInfo, {
+      videoId: args.videoId,
+      s3Key: key,
+      fileSize: args.fileSize,
+      contentType: normalizedContentType,
+    });
+
+    return { key, s3UploadId: UploadId, partUrls, partSize: MULTIPART_PART_SIZE };
+  },
+});
+
+export const completeMultipartUpload = action({
+  args: {
+    videoId: v.id("videos"),
+    key: v.string(),
+    s3UploadId: v.string(),
+    parts: v.array(v.object({ PartNumber: v.number(), ETag: v.string() })),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args) => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+
+    const s3 = getS3Client();
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: BUCKET_NAME,
+        Key: args.key,
+        UploadId: args.s3UploadId,
+        MultipartUpload: { Parts: args.parts },
+      }),
+    );
+
+    return { success: true };
   },
 });
 
@@ -275,9 +391,6 @@ export const markUploadComplete = action({
         throw new Error("Uploaded video file not found or empty.");
       }
       const contentLength = contentLengthRaw;
-      if (contentLength > MAX_PRESIGNED_PUT_FILE_SIZE_BYTES) {
-        throw new Error("Video file is too large for direct upload.");
-      }
 
       const normalizedContentType = normalizeContentType(
         head.ContentType ?? video.contentType,
@@ -296,15 +409,23 @@ export const markUploadComplete = action({
         videoId: args.videoId,
       });
 
-      const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
-        expiresIn: 60 * 60 * 24,
-      });
-      const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
-      if (asset.id) {
-        await ctx.runMutation(internal.videos.setMuxAssetReference, {
+      if (useTranscoder()) {
+        await ctx.runMutation(internal.transcodeQueue.enqueue, {
           videoId: args.videoId,
-          muxAssetId: asset.id,
+          s3Key: video.s3Key,
+          bucket: BUCKET_NAME,
         });
+      } else {
+        const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+          expiresIn: 60 * 60 * 24,
+        });
+        const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
+        if (asset.id) {
+          await ctx.runMutation(internal.videos.setMuxAssetReference, {
+            videoId: args.videoId,
+            muxAssetId: asset.id,
+          });
+        }
       }
     } catch (error) {
       const shouldDeleteObject = shouldDeleteUploadedObjectOnFailure(error);
@@ -325,12 +446,59 @@ export const markUploadComplete = action({
       const uploadError =
         shouldDeleteObject && error instanceof Error
           ? error.message
-          : "Mux ingest failed after upload.";
+          : "Video processing failed after upload.";
       await ctx.runMutation(internal.videos.markAsFailed, {
         videoId: args.videoId,
         uploadError,
       });
       throw error;
+    }
+
+    return { success: true };
+  },
+});
+
+export const retryTranscode = action({
+  args: {
+    videoId: v.id("videos"),
+    tiers: v.optional(v.array(v.string())),
+    force: v.optional(v.boolean()),
+  },
+  returns: v.object({ success: v.boolean() }),
+  handler: async (ctx, args) => {
+    await requireVideoMemberAccess(ctx, args.videoId);
+
+    const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
+      videoId: args.videoId,
+    });
+
+    if (!video || !video.s3Key) {
+      throw new Error("Video not found or has no source file");
+    }
+
+    await ctx.runMutation(internal.videos.markAsProcessing, {
+      videoId: args.videoId,
+    });
+
+    if (useTranscoder()) {
+      await ctx.runMutation(internal.transcodeQueue.enqueue, {
+        videoId: args.videoId,
+        s3Key: video.s3Key,
+        bucket: BUCKET_NAME,
+        requestedTiers: args.tiers,
+        force: args.force,
+      });
+    } else {
+      const ingestUrl = await buildSignedBucketObjectUrl(video.s3Key, {
+        expiresIn: 60 * 60 * 24,
+      });
+      const asset = await createMuxAssetFromInputUrl(args.videoId, ingestUrl);
+      if (asset.id) {
+        await ctx.runMutation(internal.videos.setMuxAssetReference, {
+          videoId: args.videoId,
+          muxAssetId: asset.id,
+        });
+      }
     }
 
     return { success: true };
@@ -349,7 +517,7 @@ export const markUploadFailed = action({
 
     await ctx.runMutation(internal.videos.markAsFailed, {
       videoId: args.videoId,
-      uploadError: "Upload failed before Mux could process the asset.",
+      uploadError: "Upload failed before video could be processed.",
     });
 
     return { success: true };
@@ -370,7 +538,15 @@ export const getPlaybackSession = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
+      throw new Error("Video not found or not ready");
+    }
+
+    if (video.hlsKey) {
+      return buildHlsPlaybackSession(video.hlsKey, video.thumbnailKey, video.thumbnailUrl);
+    }
+
+    if (!video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
 
@@ -393,7 +569,15 @@ export const getPlaybackUrl = action({
       videoId: args.videoId,
     });
 
-    if (!video || !video.muxPlaybackId || video.status !== "ready") {
+    if (!video || video.status !== "ready") {
+      throw new Error("Video not found or not ready");
+    }
+
+    if (video.hlsKey) {
+      return { url: buildPublicContentUrl(video.hlsKey) };
+    }
+
+    if (!video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
 
@@ -427,6 +611,7 @@ export const getOriginalPlaybackUrl = action({
       url: await buildSignedBucketObjectUrl(video.s3Key, {
         expiresIn: 600,
         contentType,
+        forBrowser: true,
       }),
       contentType,
     };
@@ -447,7 +632,15 @@ export const getPublicPlaybackSession = action({
       publicId: args.publicId,
     });
 
-    if (!result?.video?.muxPlaybackId) {
+    if (!result?.video) {
+      throw new Error("Video not found or not ready");
+    }
+
+    if (result.video.hlsKey) {
+      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl);
+    }
+
+    if (!result.video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
 
@@ -474,7 +667,15 @@ export const getSharedPlaybackSession = action({
       grantToken: args.grantToken,
     });
 
-    if (!result?.video?.muxPlaybackId) {
+    if (!result?.video) {
+      throw new Error("Video not found or not ready");
+    }
+
+    if (result.video.hlsKey) {
+      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl);
+    }
+
+    if (!result.video.muxPlaybackId) {
       throw new Error("Video not found or not ready");
     }
 
@@ -518,6 +719,7 @@ export const getDownloadUrl = action({
         expiresIn: 600,
         filename,
         contentType: video.contentType ?? "video/mp4",
+        forBrowser: true,
       }),
       filename,
     };

@@ -1,6 +1,6 @@
 
-import { useAuth } from "@clerk/tanstack-react-start";
 import { useConvex, useQuery } from "convex/react";
+import { useAuthState } from "@/lib/auth";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { api } from "@convex/_generated/api";
 import type { Id } from "@convex/_generated/dataModel";
@@ -48,7 +48,9 @@ function dragEventHasFiles(event: DragEvent) {
 }
 
 export default function DashboardLayout() {
-  const { isLoaded, userId } = useAuth();
+  const { isLoading, isAuthenticated } = useAuthState();
+  const isLoaded = !isLoading;
+  const userId = isAuthenticated ? "authenticated" : null;
   const location = useLocation();
   const { pathname, searchStr } = location;
   const params = useParams({ strict: false });

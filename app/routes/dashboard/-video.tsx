@@ -80,12 +80,14 @@ export default function VideoPage() {
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [originalPlaybackUrl, setOriginalPlaybackUrl] = useState<string | null>(null);
   const [isLoadingOriginalPlayback, setIsLoadingOriginalPlayback] = useState(false);
-  const [preferredSource, setPreferredSource] = useState<"mux720" | "original">("original");
+  const [preferredSource, setPreferredSource] = useState<"mux720" | "original" | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
-  const isPlayable = video?.status === "ready" && Boolean(video?.muxPlaybackId);
+  const isPlayable = video?.status === "ready" && (Boolean(video?.muxPlaybackId) || Boolean(video?.hlsKey));
   const playbackUrl = playbackSession?.url ?? null;
+  const effectiveSource = preferredSource
+    ?? (video?.hlsKey && playbackUrl ? "mux720" : "original");
   const activePlaybackUrl =
-    preferredSource === "mux720"
+    effectiveSource === "mux720"
       ? playbackUrl ?? originalPlaybackUrl
       : originalPlaybackUrl ?? playbackUrl;
   const activeQualityId =
@@ -143,7 +145,7 @@ export default function VideoPage() {
     return () => {
       cancelled = true;
     };
-  }, [getPlaybackSession, isPlayable, resolvedVideoId, video?.muxPlaybackId]);
+  }, [getPlaybackSession, isPlayable, resolvedVideoId, video?.muxPlaybackId, video?.hlsKey]);
 
   useEffect(() => {
     if (!resolvedVideoId || !video || video.status === "uploading" || video.status === "failed") {
@@ -389,7 +391,7 @@ export default function VideoPage() {
             <div className="flex-shrink-0 flex items-center gap-2 bg-[#1a1a1a] px-4 py-2 text-sm text-white">
               <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-[#2d5a2d]" />
               <span className="font-semibold">Original playback active.</span>
-              <span className="text-white/60">720p stream is still encoding.</span>
+              <span className="text-white/60">Transcoded stream is still encoding.</span>
             </div>
           ) : null}
 
@@ -406,11 +408,17 @@ export default function VideoPage() {
               onRequestDownload={requestDownload}
               controlsBelow
               qualityOptionsConfig={[
-                {
-                  id: "mux720",
-                  label: playbackUrl ? "720p" : "720p (encoding...)",
-                  disabled: !playbackUrl,
-                },
+                ...(video?.hlsKey
+                  ? activeQualityId !== "mux720"
+                    ? [{ id: "mux720", label: "Adaptive", disabled: !playbackUrl }]
+                    : []
+                  : [
+                      {
+                        id: "mux720",
+                        label: playbackUrl ? "720p" : "720p (encoding...)",
+                        disabled: !playbackUrl,
+                      },
+                    ]),
                 {
                   id: "original",
                   label: "Original",

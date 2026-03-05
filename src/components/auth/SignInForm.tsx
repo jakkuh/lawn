@@ -1,0 +1,94 @@
+import { useAuthActions } from "@convex-dev/auth/react";
+import { useState } from "react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+
+export function SignInForm() {
+  const { signIn } = useAuthActions();
+  const navigate = useNavigate();
+  const search = useRouterState({
+    select: (state) => state.location.searchStr,
+  });
+  const redirectUrl =
+    new URLSearchParams(search).get("redirect_url") || "/dashboard";
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await signIn("password", { email, password, flow: "signIn" });
+      navigate({ to: redirectUrl });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Sign in failed. Check your credentials.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="bg-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[8px_8px_0px_0px_var(--shadow-color)] p-8">
+      <h1 className="text-[#1a1a1a] font-black uppercase tracking-tighter text-2xl font-mono mb-1">
+        Sign In
+      </h1>
+      <p className="text-[#888] font-mono text-sm mb-6">
+        Welcome back
+      </p>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-[#1a1a1a] font-bold uppercase font-mono text-xs mb-1">
+            Email
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="w-full bg-transparent border-2 border-[#1a1a1a] text-[#1a1a1a] focus:border-[#2d5a2d] focus:outline-none px-3 py-2 font-mono"
+          />
+        </div>
+        <div>
+          <label className="block text-[#1a1a1a] font-bold uppercase font-mono text-xs mb-1">
+            Password
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="w-full bg-transparent border-2 border-[#1a1a1a] text-[#1a1a1a] focus:border-[#2d5a2d] focus:outline-none px-3 py-2 font-mono"
+          />
+        </div>
+
+        {error && (
+          <p className="text-red-600 font-mono text-sm">{error}</p>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-[#1a1a1a] hover:bg-[#2d5a2d] text-[#f0f0e8] border-2 border-[#1a1a1a] shadow-[4px_4px_0px_0px_var(--shadow-color)] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_var(--shadow-color)] font-mono font-bold uppercase text-sm py-2.5 px-4 transition-all disabled:opacity-50"
+        >
+          {loading ? "Signing in..." : "Sign In"}
+        </button>
+      </form>
+
+      <p className="mt-6 text-center text-[#888] font-mono text-sm">
+        Don&apos;t have an account?{" "}
+        <Link
+          to="/sign-up"
+          className="text-[#2d5a2d] hover:text-[#1a1a1a] font-bold"
+        >
+          Sign up
+        </Link>
+      </p>
+    </div>
+  );
+}

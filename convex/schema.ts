@@ -1,7 +1,9 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
 
 export default defineSchema({
+  ...authTables,
   teams: defineTable({
     name: v.string(),
     slug: v.string(),
@@ -82,6 +84,9 @@ export default defineSchema({
         v.literal("errored")
       )
     ),
+    // Self-hosted HLS transcode output
+    hlsKey: v.optional(v.string()),
+    thumbnailKey: v.optional(v.string()),
     // Metadata
     s3Key: v.optional(v.string()),
     duration: v.optional(v.number()),
@@ -145,4 +150,46 @@ export default defineSchema({
   })
     .index("by_token", ["token"])
     .index("by_share_link", ["shareLinkId"]),
+
+  transcodeJobs: defineTable({
+    videoId: v.id("videos"),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("processing"),
+      v.literal("completed"),
+      v.literal("failed"),
+    ),
+    s3Key: v.string(),
+    bucket: v.string(),
+    requestedTiers: v.optional(v.array(v.string())),
+    force: v.optional(v.boolean()),
+    tiers: v.optional(
+      v.array(
+        v.object({
+          tag: v.string(),
+          status: v.union(
+            v.literal("pending"),
+            v.literal("processing"),
+            v.literal("completed"),
+            v.literal("failed"),
+          ),
+          error: v.optional(v.string()),
+        }),
+      ),
+    ),
+    sourceWidth: v.optional(v.number()),
+    sourceHeight: v.optional(v.number()),
+    sourceDuration: v.optional(v.number()),
+    attempts: v.number(),
+    maxAttempts: v.number(),
+    workerId: v.optional(v.string()),
+    lastHeartbeat: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_video", ["videoId"])
+    .index("by_status_created", ["status", "createdAt"]),
 });

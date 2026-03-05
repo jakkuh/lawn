@@ -1,0 +1,65 @@
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "3210:3210"
+      - "3211:3211"
+    volumes:
+      - convex-data:/convex/data
+    environment:
+      - CONVEX_CLOUD_ORIGIN=http://127.0.0.1:3210
+      - CONVEX_SITE_ORIGIN=http://127.0.0.1:3211
+      - RUST_LOG=info
+      - DOCUMENT_RETENTION_DELAY=172800
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: curl -f http://localhost:3210/version
+      interval: 5s
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    ports:
+      - "6791:6791"
+    environment:
+      - NEXT_PUBLIC_DEPLOYMENT_URL=http://127.0.0.1:3210
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  transcoder:
+    build: ./docker/transcoder
+    ports:
+      - "3300:3300"
+    environment:
+      - CONVEX_URL=http://host.docker.internal:3211
+      - TRANSCODER_SECRET=${TRANSCODER_WEBHOOK_SECRET:-lawn-transcode-secret}
+      - S3_ENDPOINT=${RAILWAY_ENDPOINT:-http://host.docker.internal:9000}
+      - S3_ACCESS_KEY_ID=${RAILWAY_ACCESS_KEY_ID:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${RAILWAY_SECRET_ACCESS_KEY:-minioadmin}
+      - S3_REGION=${RAILWAY_REGION:-us-east-1}
+      - HW_ACCEL=cpu
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # ── NVIDIA GPU (replace the build + environment above) ──
+    # build:
+    #   context: ./docker/transcoder
+    #   dockerfile: Dockerfile.nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+    #   - CONVEX_URL=http://host.docker.internal:3211
+    #   - TRANSCODER_SECRET=${TRANSCODER_WEBHOOK_SECRET:-lawn-transcode-secret}
+    #   - S3_ENDPOINT=${RAILWAY_ENDPOINT:-http://host.docker.internal:9000}
+    #   - S3_ACCESS_KEY_ID=${RAILWAY_ACCESS_KEY_ID:-minioadmin}
+    #   - S3_SECRET_ACCESS_KEY=${RAILWAY_SECRET_ACCESS_KEY:-minioadmin}
+    #   - S3_REGION=${RAILWAY_REGION:-us-east-1}
+    #   - HW_ACCEL=nvidia
+
+volumes:
+  convex-data:

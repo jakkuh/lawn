@@ -13,6 +13,7 @@ import { prewarmProject } from "./-project.data";
 import { useDashboardIndexData } from "./-index.data";
 import { Id } from "@convex/_generated/dataModel";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { isSelfHosted } from "@/lib/selfHosted";
 
 export const Route = createFileRoute("/dashboard/")({
   component: DashboardPage,
@@ -153,21 +154,25 @@ export default function DashboardPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6">
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-black text-[#1a1a1a]">{team.name}</h2>
-                    <Badge variant="secondary">
-                      {formatTeamPlanLabel(
-                        team.plan,
-                        team.billingStatus,
-                        team.stripeSubscriptionId,
-                      )}
-                    </Badge>
+                    {!isSelfHosted && (
+                      <Badge variant="secondary">
+                        {formatTeamPlanLabel(
+                          team.plan,
+                          team.billingStatus,
+                          team.stripeSubscriptionId,
+                        )}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-4">
-                    <Link
-                      to={teamSettingsPath(team.slug)}
-                      className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold transition-colors"
-                    >
-                      Billing
-                    </Link>
+                    {!isSelfHosted && (
+                      <Link
+                        to={teamSettingsPath(team.slug)}
+                        className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold transition-colors"
+                      >
+                        Billing
+                      </Link>
+                    )}
                     <Link
                       to={teamHomePath(team.slug)}
                       className="text-[#888] hover:text-[#1a1a1a] text-sm font-bold flex items-center gap-1 transition-colors"

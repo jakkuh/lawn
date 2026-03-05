@@ -1,7 +1,17 @@
 import { SignUp } from "@clerk/tanstack-react-start";
 import { useRouterState } from "@tanstack/react-router";
+import { isSelfHosted } from "@/lib/selfHosted";
+import { SignUpForm } from "@/components/auth/SignUpForm";
 
 export default function SignUpPage() {
+  if (isSelfHosted) {
+    return <SignUpForm />;
+  }
+
+  return <ClerkSignUp />;
+}
+
+function ClerkSignUp() {
   const search = useRouterState({
     select: (state) => state.location.searchStr,
   });

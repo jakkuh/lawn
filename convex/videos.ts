@@ -144,6 +144,8 @@ export const getByPublicId = query({
         thumbnailUrl: video.thumbnailUrl,
         muxAssetId: video.muxAssetId,
         muxPlaybackId: video.muxPlaybackId,
+        hlsKey: video.hlsKey,
+        thumbnailKey: video.thumbnailKey,
         contentType: video.contentType,
         s3Key: video.s3Key,
       },
@@ -191,6 +193,8 @@ export const getByShareGrant = query({
         thumbnailUrl: video.thumbnailUrl,
         muxAssetId: video.muxAssetId,
         muxPlaybackId: video.muxPlaybackId,
+        hlsKey: video.hlsKey,
+        thumbnailKey: video.thumbnailKey,
         contentType: video.contentType,
         s3Key: video.s3Key,
       },
@@ -264,6 +268,14 @@ export const remove = mutation({
     for (const link of shareLinks) {
       await deleteShareAccessGrantsForLink(ctx, link._id);
       await ctx.db.delete(link._id);
+    }
+
+    const transcodeJobs = await ctx.db
+      .query("transcodeJobs")
+      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
+      .collect();
+    for (const job of transcodeJobs) {
+      await ctx.db.delete(job._id);
     }
 
     await ctx.db.delete(args.videoId);
@@ -360,6 +372,28 @@ export const markAsReady = internalMutation({
       uploadError: undefined,
       status: "ready",
     });
+  },
+});
+
+export const markAsReadyFromTranscode = internalMutation({
+  args: {
+    videoId: v.id("videos"),
+    hlsKey: v.string(),
+    thumbnailKey: v.optional(v.string()),
+    thumbnailUrl: v.optional(v.string()),
+    duration: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const patch: Record<string, unknown> = {
+      hlsKey: args.hlsKey,
+      status: "ready",
+      muxAssetStatus: "ready",
+      uploadError: undefined,
+    };
+    if (args.thumbnailKey) patch.thumbnailKey = args.thumbnailKey;
+    if (args.thumbnailUrl) patch.thumbnailUrl = args.thumbnailUrl;
+    if (args.duration !== undefined) patch.duration = args.duration;
+    await ctx.db.patch(args.videoId, patch);
   },
 });
 

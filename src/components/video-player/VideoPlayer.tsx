@@ -689,15 +689,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const canDownload = allowDownload && (Boolean(downloadUrl) || Boolean(onRequestDownload));
   const isHls = isHlsSource(src);
   const hasExternalQualityOptions = Boolean(qualityOptionsConfig && qualityOptionsConfig.length > 0);
+  const hasManualQualityOptions = isHls && qualityOptions.length > 0;
   const qualityLabel = useMemo(() => {
+    if (hasManualQualityOptions) {
+      if (selectedQualityLevel === AUTO_QUALITY_LEVEL) return "Auto";
+      return qualityOptions.find((option) => option.level === selectedQualityLevel)?.label ?? "Auto";
+    }
     if (hasExternalQualityOptions) {
       return qualityOptionsConfig?.find((option) => option.id === selectedQualityId)?.label ?? "Quality";
     }
     if (!isHls) return "Original";
-    if (selectedQualityLevel === AUTO_QUALITY_LEVEL) return "Auto";
-    return qualityOptions.find((option) => option.level === selectedQualityLevel)?.label ?? "Auto";
-  }, [hasExternalQualityOptions, isHls, qualityOptions, qualityOptionsConfig, selectedQualityId, selectedQualityLevel]);
-  const hasManualQualityOptions = isHls && qualityOptions.length > 0;
+    return "Auto";
+  }, [hasManualQualityOptions, hasExternalQualityOptions, isHls, qualityOptions, qualityOptionsConfig, selectedQualityId, selectedQualityLevel]);
   const isExternalControls = controlsBelow && !isFullscreen;
 
   // ── Controls content (timeline + buttons) ─────────────────────────
@@ -844,22 +847,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                 className="absolute right-0 bottom-11 z-30 min-w-[170px] rounded-lg border border-white/10 bg-black/90 p-1.5 text-sm text-white shadow-2xl backdrop-blur"
                 onClick={(e) => e.stopPropagation()}
               >
-                {hasExternalQualityOptions ? (
-                  <>
-                    {qualityOptionsConfig?.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        onClick={() => { if (option.disabled) return; onSelectQuality?.(option.id); setQualityMenuOpen(false); showControls(); }}
-                        disabled={option.disabled}
-                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <span>{option.label}</span>
-                        {selectedQualityId === option.id && <Check className="h-4 w-4" />}
-                      </button>
-                    ))}
-                  </>
-                ) : hasManualQualityOptions ? (
+                {hasManualQualityOptions && (
                   <>
                     <button
                       type="button"
@@ -881,7 +869,30 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
                       </button>
                     ))}
                   </>
-                ) : (
+                )}
+
+                {hasManualQualityOptions && hasExternalQualityOptions && (
+                  <div className="my-1 border-t border-white/10" />
+                )}
+
+                {hasExternalQualityOptions && (
+                  <>
+                    {qualityOptionsConfig?.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => { if (option.disabled) return; onSelectQuality?.(option.id); setQualityMenuOpen(false); showControls(); }}
+                        disabled={option.disabled}
+                        className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/95 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <span>{option.label}</span>
+                        {selectedQualityId === option.id && !hasManualQualityOptions && <Check className="h-4 w-4" />}
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {!hasManualQualityOptions && !hasExternalQualityOptions && (
                   <div className="flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-white/85">
                     <span>{isHls ? "Auto (browser)" : "Original source"}</span>
                     <Check className="h-4 w-4" />

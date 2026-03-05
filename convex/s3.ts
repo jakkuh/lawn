@@ -21,7 +21,16 @@ export function buildPublicUrl(key: string): string {
   return url.toString();
 }
 
-export function getS3Client(): S3Client {
+export function buildPublicContentUrl(key: string): string {
+  const r2PublicUrl = process.env.R2_PUBLIC_URL;
+  if (r2PublicUrl) {
+    const base = r2PublicUrl.endsWith("/") ? r2PublicUrl.slice(0, -1) : r2PublicUrl;
+    return `${base}/${key}`;
+  }
+  return buildPublicUrl(key);
+}
+
+function getS3Credentials() {
   const accessKeyId = process.env.RAILWAY_ACCESS_KEY_ID;
   const secretAccessKey = process.env.RAILWAY_SECRET_ACCESS_KEY;
 
@@ -29,13 +38,32 @@ export function getS3Client(): S3Client {
     throw new Error("Missing Railway S3 credentials");
   }
 
+  return { accessKeyId, secretAccessKey };
+}
+
+export function getS3Client(): S3Client {
+  const credentials = getS3Credentials();
+
   return new S3Client({
     region: process.env.RAILWAY_REGION || "us-east-1",
     endpoint: process.env.RAILWAY_ENDPOINT,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
+    credentials,
+    forcePathStyle: true,
+  });
+}
+
+export function getS3SigningClient(): S3Client {
+  const publicUrl = process.env.RAILWAY_PUBLIC_URL;
+  if (!publicUrl) {
+    return getS3Client();
+  }
+
+  const credentials = getS3Credentials();
+
+  return new S3Client({
+    region: process.env.RAILWAY_REGION || "us-east-1",
+    endpoint: publicUrl,
+    credentials,
     forcePathStyle: true,
   });
 }

@@ -2,6 +2,10 @@ import { components } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
 
+function isSelfHosted(): boolean {
+  return !process.env.STRIPE_SECRET_KEY;
+}
+
 export type TeamPlan = "basic" | "pro";
 
 const GIBIBYTE = 1024 ** 3;
@@ -74,6 +78,15 @@ export async function getTeamSubscriptionState(
     throw new Error("Team not found");
   }
 
+  if (isSelfHosted()) {
+    return {
+      team,
+      subscription: null,
+      plan: "pro" as TeamPlan,
+      hasActiveSubscription: true,
+    };
+  }
+
   const subscription = await getTeamSubscriptionByOrgId(ctx, teamId);
   const subscriptionPlan = resolvePlanFromStripePriceId(subscription?.priceId);
   const plan = subscriptionPlan ?? normalizeStoredTeamPlan(team.plan);
@@ -119,6 +132,16 @@ export async function assertTeamHasActiveSubscription(
   ctx: BillingCtx,
   teamId: Id<"teams">,
 ) {
+  if (isSelfHosted()) {
+    const team = await ctx.db.get(teamId);
+    if (!team) throw new Error("Team not found");
+    return {
+      team,
+      subscription: null,
+      plan: "pro" as TeamPlan,
+      hasActiveSubscription: true,
+    };
+  }
   const state = await getTeamSubscriptionState(ctx, teamId);
   if (!state.hasActiveSubscription) {
     throw new Error("An active Basic or Pro subscription is required.");
@@ -131,6 +154,19 @@ export async function assertTeamCanStoreBytes(
   teamId: Id<"teams">,
   incomingBytes: number,
 ) {
+  if (isSelfHosted()) {
+    const team = await ctx.db.get(teamId);
+    if (!team) throw new Error("Team not found");
+    return {
+      team,
+      subscription: null,
+      plan: "pro" as TeamPlan,
+      hasActiveSubscription: true,
+      storageUsedBytes: 0,
+      storageLimitBytes: Infinity,
+    };
+  }
+
   const state = await assertTeamHasActiveSubscription(ctx, teamId);
   const storageUsedBytes = await getTeamStorageUsedBytes(ctx, teamId);
   const storageLimitBytes = TEAM_PLAN_STORAGE_LIMIT_BYTES[state.plan];

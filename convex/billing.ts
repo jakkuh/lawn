@@ -15,8 +15,19 @@ import {
   TEAM_PLAN_STORAGE_LIMIT_BYTES,
 } from "./billingHelpers";
 
-const stripeClient = new StripeSubscriptions(components.stripe, {});
-const stripe = new Stripe(stripeClient.apiKey);
+let _stripeClient: StripeSubscriptions | null = null;
+let _stripe: Stripe | null = null;
+
+function getStripeClient() {
+  if (!_stripeClient) _stripeClient = new StripeSubscriptions(components.stripe, {});
+  return _stripeClient;
+}
+
+function getStripe() {
+  if (!_stripe) _stripe = new Stripe(getStripeClient().apiKey);
+  return _stripe;
+}
+
 const TEAM_TRIAL_DAYS = 7;
 
 const teamPlanValidator = v.union(v.literal("basic"), v.literal("pro"));
@@ -69,7 +80,7 @@ export const createSubscriptionCheckout = action({
         typeof identity.email === "string" && identity.email.length > 0
           ? identity.email
           : undefined;
-      const customer = await stripeClient.createCustomer(ctx, {
+      const customer = await getStripeClient().createCustomer(ctx, {
         email: userEmail,
         name: team.name,
         metadata: {
@@ -116,7 +127,7 @@ export const createSubscriptionCheckout = action({
       sessionParams.customer = stripeCustomerId;
     }
 
-    const session = await stripe.checkout.sessions.create(sessionParams);
+    const session = await getStripe().checkout.sessions.create(sessionParams);
     return {
       sessionId: session.id,
       url: session.url,
@@ -155,7 +166,7 @@ export const createCustomerPortalSession = action({
       throw new Error("No Stripe customer found for this team yet.");
     }
 
-    return await stripeClient.createCustomerPortalSession(ctx, {
+    return await getStripeClient().createCustomerPortalSession(ctx, {
       customerId: stripeCustomerId,
       returnUrl: args.returnUrl,
     });

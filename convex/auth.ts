@@ -1,7 +1,15 @@
+import { convexAuth, getAuthUserId } from "@convex-dev/auth/server";
+import { Password } from "@convex-dev/auth/providers/Password";
 import { QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
-type ClerkIdentity = NonNullable<
+export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
+  providers: [Password],
+});
+
+export { getAuthUserId };
+
+type UserIdentity = NonNullable<
   Awaited<ReturnType<QueryCtx["auth"]["getUserIdentity"]>>
 >;
 
@@ -9,12 +17,12 @@ function hasString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function getOptionalString(identity: ClerkIdentity, key: string): string | undefined {
+function getOptionalString(identity: UserIdentity, key: string): string | undefined {
   const value = (identity as Record<string, unknown>)[key];
   return hasString(value) ? value : undefined;
 }
 
-export function identityName(identity: ClerkIdentity): string {
+export function identityName(identity: UserIdentity): string {
   const name = getOptionalString(identity, "name");
   if (name) return name;
 
@@ -28,11 +36,11 @@ export function identityName(identity: ClerkIdentity): string {
   return "Unknown";
 }
 
-export function identityEmail(identity: ClerkIdentity): string {
+export function identityEmail(identity: UserIdentity): string {
   return getOptionalString(identity, "email") ?? "";
 }
 
-export function identityAvatarUrl(identity: ClerkIdentity): string | undefined {
+export function identityAvatarUrl(identity: UserIdentity): string | undefined {
   return getOptionalString(identity, "pictureUrl");
 }
 
@@ -40,6 +48,22 @@ export async function getUser(ctx: QueryCtx | MutationCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
     return null;
+  }
+
+  if (!hasString((identity as any).name) || !hasString((identity as any).email)) {
+    const userId = await getAuthUserId(ctx);
+    if (userId) {
+      const userRecord = await ctx.db.get(userId);
+      if (userRecord) {
+        const patched = identity as Record<string, unknown>;
+        if (!hasString(patched.name) && hasString(userRecord.name))
+          patched.name = userRecord.name;
+        if (!hasString(patched.email) && hasString(userRecord.email))
+          patched.email = userRecord.email;
+        if (!hasString(patched.pictureUrl) && hasString(userRecord.image))
+          patched.pictureUrl = userRecord.image;
+      }
+    }
   }
 
   return identity;

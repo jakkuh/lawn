@@ -47,12 +47,13 @@ export const create = mutation({
       counter++;
     }
 
+    const isSelfHostedMode = !process.env.STRIPE_SECRET_KEY;
     const teamId = await ctx.db.insert("teams", {
       name: args.name,
       slug,
       ownerClerkId: user.subject,
-      plan: "basic",
-      billingStatus: "not_subscribed",
+      plan: isSelfHostedMode ? "pro" : "basic",
+      billingStatus: isSelfHostedMode ? "active" : "not_subscribed",
     });
 
     await ctx.db.insert("teamMembers", {
@@ -389,11 +390,13 @@ export const deleteTeam = mutation({
   args: { teamId: v.id("teams") },
   handler: async (ctx, args) => {
     await requireTeamAccess(ctx, args.teamId, "owner");
-    const subscriptionState = await getTeamSubscriptionState(ctx, args.teamId);
-    if (subscriptionState.hasActiveSubscription) {
-      throw new Error(
-        "Cannot delete a team with an active subscription. Cancel billing first in team settings.",
-      );
+    if (process.env.STRIPE_SECRET_KEY) {
+      const subscriptionState = await getTeamSubscriptionState(ctx, args.teamId);
+      if (subscriptionState.hasActiveSubscription) {
+        throw new Error(
+          "Cannot delete a team with an active subscription. Cancel billing first in team settings.",
+        );
+      }
     }
 
     // Delete all team members

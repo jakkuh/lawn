@@ -3,7 +3,7 @@ import { useMutation } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { useState } from "react";
-import { useUser } from "@clerk/tanstack-react-start";
+import { useCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,7 @@ export default function InvitePage() {
   const params = useParams({ strict: false });
   const navigate = useNavigate({});
   const token = params.token as string;
-  const { user, isLoaded } = useUser();
+  const { id: userId, email: userEmail, isLoaded } = useCurrentUser();
 
   const { invite } = useInviteData({ token });
   const acceptInvite = useMutation(api.teams.acceptInvite);
@@ -71,8 +71,7 @@ export default function InvitePage() {
     );
   }
 
-  // User not signed in
-  if (!user) {
+  if (!userId) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -105,8 +104,7 @@ export default function InvitePage() {
     );
   }
 
-  // User signed in but with different email
-  if (user.primaryEmailAddress?.emailAddress !== invite.email) {
+  if (userEmail !== invite.email) {
     return (
       <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
         <Card className="max-w-md w-full">
@@ -117,7 +115,7 @@ export default function InvitePage() {
             <CardTitle>Different email address</CardTitle>
             <CardDescription>
               This invite was sent to {invite.email}, but you&apos;re signed in as{" "}
-              {user.primaryEmailAddress?.emailAddress}.
+              {userEmail}.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -135,7 +133,6 @@ export default function InvitePage() {
     );
   }
 
-  // User signed in with correct email
   return (
     <div className="min-h-screen bg-[#f0f0e8] flex items-center justify-center p-4">
       <Card className="max-w-md w-full">

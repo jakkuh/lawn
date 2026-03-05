@@ -35,6 +35,7 @@ import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { prewarmProject } from "./-project.data";
 import { useTeamData } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { isSelfHosted } from "@/lib/selfHosted";
 
 type TeamProjectCardProps = {
   teamSlug: string;
@@ -184,9 +185,9 @@ export default function TeamPage() {
   };
 
   const canManageMembers = team?.role === "owner" || team?.role === "admin";
-  const hasActiveSubscription = billing?.hasActiveSubscription ?? false;
+  const hasActiveSubscription = isSelfHosted || (billing?.hasActiveSubscription ?? false);
   const canCreateProject = team?.role !== "viewer" && hasActiveSubscription;
-  const canAccessBilling = team?.role === "owner";
+  const canAccessBilling = !isSelfHosted && team?.role === "owner";
   const billingPath = team ? teamSettingsPath(team.slug) : null;
 
   return (

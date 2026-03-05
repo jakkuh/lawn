@@ -12,6 +12,7 @@ import { useRoutePrewarmIntent } from "@/lib/useRoutePrewarmIntent";
 import { useSettingsData } from "./-settings.data";
 import { prewarmTeam } from "./-team.data";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { isSelfHosted } from "@/lib/selfHosted";
 
 type BillingPlan = "basic" | "pro";
 
@@ -285,61 +286,63 @@ export default function TeamSettingsPage() {
           </div>
 
           {/* ── Stats strip ── */}
-          <div className="border-t-2 border-b-2 border-[#1a1a1a] py-5 mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 lg:gap-12">
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Plan
-              </p>
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black text-[#1a1a1a]">
-                  {currentPlanLabel}
-                </span>
-                {hasActiveSubscription ? (
-                  <Badge variant={isTrialing ? "warning" : "success"}>
-                    {isTrialing ? "Trialing" : "Active"}
-                  </Badge>
-                ) : (
-                  <Badge variant="warning">{subscriptionStatus}</Badge>
+          {!isSelfHosted && (
+            <div className="border-t-2 border-b-2 border-[#1a1a1a] py-5 mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 lg:gap-12">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
+                  Plan
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-black text-[#1a1a1a]">
+                    {currentPlanLabel}
+                  </span>
+                  {hasActiveSubscription ? (
+                    <Badge variant={isTrialing ? "warning" : "success"}>
+                      {isTrialing ? "Trialing" : "Active"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning">{subscriptionStatus}</Badge>
+                  )}
+                </div>
+                {isTrialing && typeof billing?.currentPeriodEnd === "number" && (
+                  <p className="text-xs text-[#888] mt-2">
+                    Trial ends {formatUtcDateFromUnixSeconds(billing.currentPeriodEnd)} UTC
+                  </p>
                 )}
               </div>
-              {isTrialing && typeof billing?.currentPeriodEnd === "number" && (
-                <p className="text-xs text-[#888] mt-2">
-                  Trial ends {formatUtcDateFromUnixSeconds(billing.currentPeriodEnd)} UTC
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
+                  Storage
                 </p>
-              )}
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Storage
-              </p>
-              <p className="text-xl font-black text-[#1a1a1a]">
-                {billing ? formatBytes(storageUsed) : "—"}
-                <span className="text-sm font-bold text-[#888]">
-                  {" "}
-                  / {formatBytes(storageLimit)}
-                </span>
-              </p>
-              <div className="h-1.5 bg-[#ddd] mt-2">
-                <div
-                  className="h-full bg-[#2d5a2d] transition-all duration-500"
-                  style={{ width: `${storagePct}%` }}
-                />
+                <p className="text-xl font-black text-[#1a1a1a]">
+                  {billing ? formatBytes(storageUsed) : "—"}
+                  <span className="text-sm font-bold text-[#888]">
+                    {" "}
+                    / {formatBytes(storageLimit)}
+                  </span>
+                </p>
+                <div className="h-1.5 bg-[#ddd] mt-2">
+                  <div
+                    className="h-full bg-[#2d5a2d] transition-all duration-500"
+                    style={{ width: `${storagePct}%` }}
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
+                  Seats
+                </p>
+                <p className="text-xl font-black text-[#1a1a1a]">
+                  {planConfig.seats}
+                </p>
               </div>
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-[0.2em] text-[#888] mb-1">
-                Seats
-              </p>
-              <p className="text-xl font-black text-[#1a1a1a]">
-                {planConfig.seats}
-              </p>
-            </div>
-          </div>
+          )}
 
           {/* ── Two-column: Plans + Members ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 lg:gap-12">
+          <div className={`grid grid-cols-1 ${isSelfHosted ? "" : "lg:grid-cols-5"} gap-8 lg:gap-12`}>
             {/* Plans column */}
-            <div className="lg:col-span-3">
+            {!isSelfHosted && <div className="lg:col-span-3">
               <h2 className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#888] mb-4">
                 Plans
               </h2>
@@ -428,10 +431,10 @@ export default function TeamSettingsPage() {
                   billing starts.
                 </p>
               )}
-            </div>
+            </div>}
 
             {/* Members column */}
-            <div className="lg:col-span-2">
+            <div className={isSelfHosted ? "" : "lg:col-span-2"}>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-[10px] uppercase tracking-[0.2em] font-bold text-[#888]">
                   Members
@@ -488,7 +491,7 @@ export default function TeamSettingsPage() {
                   Delete team
                 </p>
                 <p className="text-xs text-[#888] mt-0.5">
-                  {canDeleteTeam
+                  {canDeleteTeam || isSelfHosted
                     ? "Permanently remove this team, all projects, and videos."
                     : "Cancel the active subscription before deleting this team."}
                 </p>
@@ -497,7 +500,7 @@ export default function TeamSettingsPage() {
                 variant="destructive"
                 size="sm"
                 onClick={handleDeleteTeam}
-                disabled={!canDeleteTeam}
+                disabled={!canDeleteTeam && !isSelfHosted}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
                 Delete

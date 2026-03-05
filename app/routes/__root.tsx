@@ -11,6 +11,7 @@ import { ConvexClientProvider } from "@/lib/convex";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme/ThemeToggle";
 import { NotFound } from "@/components/ui/NotFound";
+import { isSelfHosted } from "@/lib/selfHosted";
 import appCss from "../app.css?url";
 
 export const Route = createRootRoute({
@@ -64,6 +65,10 @@ function RootComponent() {
 }
 
 function AppShell({ children }: { children: ReactNode }) {
+  if (isSelfHosted) {
+    return <RootDocument>{children}</RootDocument>;
+  }
+
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
   if (!publishableKey) {
