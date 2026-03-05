@@ -242,6 +242,26 @@ http.route({
 });
 
 http.route({
+  path: "/api/transcode/reset",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    if (!verifyTranscoderSecret(request))
+      return jsonResponse(401, { error: "unauthorized" });
+
+    const body = (await request.json()) as Record<string, unknown>;
+    const workerId = body.workerId as string | undefined;
+    if (!workerId)
+      return jsonResponse(400, { error: "workerId required" });
+
+    const result = await ctx.runMutation(internal.transcodeQueue.requeueOrphaned, {
+      workerId,
+    });
+
+    return jsonResponse(200, { ok: true, ...result });
+  }),
+});
+
+http.route({
   path: "/health",
   method: "GET",
   handler: httpAction(async () => {

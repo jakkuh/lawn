@@ -1,7 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { join } from "node:path";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile, readdir } from "node:fs/promises";
 import {
   createS3Client,
   downloadSource,
@@ -270,7 +270,36 @@ const server = http.createServer((req, res) => {
   jsonRes(res, 404, { error: "not found" });
 });
 
-server.listen(PORT, () => {
+async function resetOrphanedJobs() {
+  if (!CONVEX_URL) return;
+  try {
+    const data = await convexApi("/api/transcode/reset", { workerId: WORKER_ID });
+    if (data.requeued > 0) {
+      log(`Re-queued ${data.requeued} orphaned job(s) from previous worker`);
+    }
+  } catch (e) {
+    log(`Reset orphaned jobs failed (non-fatal): ${e.message}`);
+  }
+}
+
+async function cleanStaleTmpDirs() {
+  try {
+    const entries = await readdir("/tmp");
+    for (const name of entries) {
+      if (name.startsWith("transcode-")) {
+        await rm(join("/tmp", name), { recursive: true, force: true });
+      }
+    }
+    const cleaned = entries.filter((n) => n.startsWith("transcode-")).length;
+    if (cleaned > 0) log(`Cleaned ${cleaned} stale temp dir(s) from previous run`);
+  } catch {
+    // /tmp might not have any — that's fine
+  }
+}
+
+server.listen(PORT, async () => {
   log(`Transcoder worker ${WORKER_ID} started (hw_accel=${HW_ACCEL})`);
+  await cleanStaleTmpDirs();
+  await resetOrphanedJobs();
   pollLoop();
 });

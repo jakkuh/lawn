@@ -32,18 +32,14 @@ services:
     restart: "no"
 
   convex-push:
-    image: node:22-bookworm-slim
+    image: ghcr.io/${GITHUB_REPO:-lawn}/convex-push:latest
     volumes:
-      - .:/app
-      - push-node-modules:/app/node_modules
       - convex-init:/init:ro
-    working_dir: /app
     depends_on:
       generate-key:
         condition: service_completed_successfully
       backend:
         condition: service_healthy
-    entrypoint: ["sh", "/app/docker/convex-push.sh"]
     restart: "no"
 
   dashboard:
@@ -59,23 +55,15 @@ services:
         condition: service_healthy
 
   web:
-    image: node:22-bookworm-slim
+    image: ghcr.io/${GITHUB_REPO:-lawn}/web:latest
     ports:
       - "5296:5296"
-    volumes:
-      - .:/app
-      - push-node-modules:/app/node_modules
-    working_dir: /app
     depends_on:
       convex-push:
         condition: service_completed_successfully
-    command: ["npx", "vite", "dev", "--port", "5296", "--host", "0.0.0.0"]
 
   transcoder:
-    build:
-      context: ./docker/transcoder
-      args:
-        BASE: ${TRANSCODER_BASE:-cpu}
+    image: ghcr.io/${GITHUB_REPO:-lawn}/transcoder:latest
     ports:
       - "3300:3300"
     environment:
@@ -90,16 +78,7 @@ services:
     depends_on:
       convex-push:
         condition: service_completed_successfully
-    # For NVIDIA GPU, set TRANSCODER_BASE=nvidia in .env and uncomment:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu, video]
 
 volumes:
   convex-data:
   convex-init:
-  push-node-modules:

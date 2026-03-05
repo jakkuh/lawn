@@ -1,0 +1,142 @@
+name: Build Docker Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docker/**"
+      - "app/**"
+      - "src/**"
+      - "convex/**"
+      - "package.json"
+      - "vite.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/docker.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  REPO: ${{ github.repository }}
+
+jobs:
+  transcoder:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - base: nvidia
+            suffix: ""
+          - base: cpu
+            suffix: "-cpu"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO }}/transcoder
+          tags: |
+            type=sha,prefix=,suffix=${{ matrix.suffix }}
+            type=raw,value=latest${{ matrix.suffix }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/transcoder
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          build-args: BASE=${{ matrix.base }}
+          cache-from: type=gha,scope=transcoder-${{ matrix.base }}
+          cache-to: type=gha,mode=max,scope=transcoder-${{ matrix.base }}
+
+  web:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO }}/web
+          tags: |
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/web/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          build-args: |
+            VITE_SELF_HOSTED=true
+            VITE_CONVEX_URL=${{ vars.VITE_CONVEX_URL || 'http://127.0.0.1:3210' }}
+            VITE_CONVEX_SITE_URL=${{ vars.VITE_CONVEX_SITE_URL || 'http://127.0.0.1:3211' }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  convex-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPO }}/convex-push
+          tags: |
+            type=sha
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/convex-push/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          cache-from: type=gha,scope=convex-push
+          cache-to: type=gha,mode=max,scope=convex-push

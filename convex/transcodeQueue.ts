@@ -3,7 +3,7 @@ import { internalMutation, query } from "./_generated/server";
 import { requireVideoAccess } from "./auth";
 import { buildPublicContentUrl } from "./s3";
 
-const HEARTBEAT_TIMEOUT_MS = 90_000;
+const HEARTBEAT_TIMEOUT_MS = 45_000;
 const MAX_ATTEMPTS = 3;
 
 const tierStatusValidator = v.union(
@@ -203,12 +203,55 @@ export const failJob = internalMutation({
         error: args.error,
         completedAt: Date.now(),
       });
-      await ctx.db.patch(job.videoId, {
-        muxAssetStatus: "errored",
-        uploadError: `Transcoding failed after ${job.maxAttempts} attempts: ${args.error}`,
-        status: "failed",
-      });
+      const video = await ctx.db.get(job.videoId);
+      if (video) {
+        await ctx.db.patch(job.videoId, {
+          muxAssetStatus: "errored",
+          uploadError: `Transcoding failed after ${job.maxAttempts} attempts: ${args.error}`,
+          status: "failed",
+        });
+      }
     }
+  },
+});
+
+export const requeueOrphaned = internalMutation({
+  args: { workerId: v.string() },
+  handler: async (ctx, args) => {
+    const processingJobs = await ctx.db
+      .query("transcodeJobs")
+      .withIndex("by_status", (q) => q.eq("status", "processing"))
+      .collect();
+
+    let count = 0;
+    for (const job of processingJobs) {
+      if (job.workerId === args.workerId) continue;
+      if (job.attempts < job.maxAttempts) {
+        await ctx.db.patch(job._id, {
+          status: "queued",
+          error: "Worker restarted — re-queued",
+          workerId: undefined,
+          lastHeartbeat: undefined,
+          startedAt: undefined,
+        });
+      } else {
+        await ctx.db.patch(job._id, {
+          status: "failed",
+          error: `Orphaned after ${job.maxAttempts} attempts`,
+          completedAt: Date.now(),
+        });
+        const video = await ctx.db.get(job.videoId);
+        if (video) {
+          await ctx.db.patch(job.videoId, {
+            muxAssetStatus: "errored",
+            uploadError: "Transcoding failed — worker lost",
+            status: "failed",
+          });
+        }
+      }
+      count++;
+    }
+    return { requeued: count };
   },
 });
 
@@ -238,11 +281,14 @@ export const requeueStaleJobs = internalMutation({
           error: `Heartbeat timed out after ${job.maxAttempts} attempts`,
           completedAt: Date.now(),
         });
-        await ctx.db.patch(job.videoId, {
-          muxAssetStatus: "errored",
-          uploadError: "Transcoding timed out",
-          status: "failed",
-        });
+        const video = await ctx.db.get(job.videoId);
+        if (video) {
+          await ctx.db.patch(job.videoId, {
+            muxAssetStatus: "errored",
+            uploadError: "Transcoding timed out",
+            status: "failed",
+          });
+        }
       }
     }
   },

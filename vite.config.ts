@@ -3,6 +3,8 @@ import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
+const skipPrerender = process.env.SKIP_PRERENDER === "true";
+
 export default defineConfig({
   plugins: [
     tsconfigPaths({
@@ -19,18 +21,20 @@ export default defineConfig({
         },
       },
       prerender: {
-        enabled: true,
+        enabled: !skipPrerender,
         autoStaticPathsDiscovery: false,
         crawlLinks: false,
       },
-      pages: [
-        { path: "/" },
-        { path: "/compare/frameio" },
-        { path: "/compare/wipster" },
-        { path: "/for/video-editors" },
-        { path: "/for/agencies" },
-        { path: "/pricing" },
-      ],
+      pages: skipPrerender
+        ? []
+        : [
+            { path: "/" },
+            { path: "/compare/frameio" },
+            { path: "/compare/wipster" },
+            { path: "/for/video-editors" },
+            { path: "/for/agencies" },
+            { path: "/pricing" },
+          ],
     }),
     viteReact(),
   ],

@@ -111,10 +111,11 @@ export async function downloadSource(s3, bucket, key, dest, log) {
         Key: key,
         Range: `bytes=${range.start}-${range.end}`,
       }));
-      const chunks = [];
-      for await (const chunk of Body) chunks.push(chunk);
-      const buf = Buffer.concat(chunks);
-      await fh.write(buf, 0, buf.length, range.start);
+      let offset = range.start;
+      for await (const chunk of Body) {
+        await fh.write(chunk, 0, chunk.length, offset);
+        offset += chunk.length;
+      }
     }, DL_MAX_STREAMS);
   } finally {
     await fh.close();
