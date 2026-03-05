@@ -207,6 +207,8 @@ http.route({
       hlsKey,
       thumbnailKey:
         typeof body.thumbnailKey === "string" ? body.thumbnailKey : undefined,
+      spriteVttKey:
+        typeof body.spriteVttKey === "string" ? body.spriteVttKey : undefined,
       duration:
         typeof body.duration === "number" ? body.duration : undefined,
       width: typeof body.width === "number" ? body.width : undefined,

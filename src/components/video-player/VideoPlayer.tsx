@@ -23,12 +23,23 @@ import { triggerDownload } from "@/lib/download";
 interface Comment {
   _id: string;
   timestampSeconds: number;
+  endTimestampSeconds?: number;
   resolved: boolean;
 }
 
 interface DownloadResult {
   url: string;
   filename?: string;
+}
+
+interface SpriteEntry {
+  start: number;
+  end: number;
+  url: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 interface VideoPlayerProps {
@@ -52,6 +63,15 @@ interface VideoPlayerProps {
   onSelectQuality?: (id: string) => void;
   /** Render controls below the video frame instead of overlaid. Ideal for mobile. */
   controlsBelow?: boolean;
+  /** URL to a WebVTT file mapping timestamps to sprite sheet thumbnails. */
+  spriteVttUrl?: string;
+  /** When set, renders a draggable editing marker on the timeline. */
+  editingMarker?: { timestampSeconds: number };
+  /** Called continuously while the editing marker is dragged. */
+  onEditingMarkerDrag?: (time: number) => void;
+  /** Range editing: in/out handles */
+  rangeMarker?: { inTime: number; outTime: number };
+  onRangeMarkerDrag?: (handle: "in" | "out", time: number) => void;
 }
 
 export interface VideoPlayerHandle {
@@ -60,6 +80,7 @@ export interface VideoPlayerHandle {
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 const AUTO_QUALITY_LEVEL = -1 as const;
+const DEFAULT_FPS = 30;
 
 type QualityLevelOption = {
   level: number;
@@ -91,6 +112,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
     selectedQualityId,
     onSelectQuality,
     controlsBelow = false,
+    spriteVttUrl,
+    editingMarker,
+    onEditingMarkerDrag,
+    rangeMarker,
+    onRangeMarkerDrag,
   },
   ref
 ) {
@@ -119,14 +145,21 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const [qualityOptions, setQualityOptions] = useState<QualityLevelOption[]>([]);
   const [selectedQualityLevel, setSelectedQualityLevel] = useState<number>(AUTO_QUALITY_LEVEL);
+  const [frameStepIndicator, setFrameStepIndicator] = useState<string | null>(null);
+  const [detectedFps, setDetectedFps] = useState<number | null>(null);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [hoverX, setHoverX] = useState(0);
+  const [sprites, setSprites] = useState<SpriteEntry[]>([]);
 
   const hideControlsTimeoutRef = useRef<number | null>(null);
+  const frameStepTimerRef = useRef<number | null>(null);
   const wasPlayingBeforeScrubRef = useRef(false);
   const scrubTimeRef = useRef(0);
   const volumeBeforeMuteRef = useRef(1);
   const isPlayingRef = useRef(false);
   const isScrubbingRef = useRef(false);
   const resumeTimeOnSourceChangeRef = useRef<number | null>(null);
+  const fpsDetectedRef = useRef(false);
 
   const groupedMarkers = useMemo(() => {
     if (!duration || comments.length === 0) return [] as { position: number; comment: Comment }[];
@@ -202,6 +235,27 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       showControls();
     },
     [applyTime, showControls]
+  );
+
+  const handleFrameStep = useCallback(
+    (direction: 1 | -1) => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (!video.paused) video.pause();
+      const fps = detectedFps ?? DEFAULT_FPS;
+      const frameDuration = 1 / fps;
+      const next = clamp(video.currentTime + direction * frameDuration, 0, duration || video.duration || 0);
+      video.currentTime = next;
+      setCurrentTime(next);
+      onTimeUpdate?.(next);
+      showControls();
+      const fpsLabel = detectedFps ? `${detectedFps}fps` : "";
+      const label = direction > 0 ? `Frame +1 ${fpsLabel}` : `Frame \u20131 ${fpsLabel}`;
+      setFrameStepIndicator(label);
+      if (frameStepTimerRef.current !== null) window.clearTimeout(frameStepTimerRef.current);
+      frameStepTimerRef.current = window.setTimeout(() => setFrameStepIndicator(null), 600);
+    },
+    [detectedFps, duration, onTimeUpdate, showControls],
   );
 
   const togglePlay = useCallback(() => {
@@ -360,6 +414,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       setIsScrubbing(true);
 
       const nextTime = getTimeFromClientX(clientX);
+      video.currentTime = nextTime;
       scrubTimeRef.current = nextTime;
       setScrubTime(nextTime);
       setCurrentTime(nextTime);
@@ -371,7 +426,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   const updateScrub = useCallback(
     (clientX: number) => {
       if (!isScrubbingRef.current) return;
+      const video = videoRef.current;
       const nextTime = getTimeFromClientX(clientX);
+      if (video) video.currentTime = nextTime;
       scrubTimeRef.current = nextTime;
       setScrubTime(nextTime);
       setCurrentTime(nextTime);
@@ -406,6 +463,51 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
   useEffect(() => {
     isScrubbingRef.current = isScrubbing;
   }, [isScrubbing]);
+
+  useEffect(() => {
+    if (!spriteVttUrl) { setSprites([]); return; }
+    let cancelled = false;
+    fetch(spriteVttUrl)
+      .then((r) => r.text())
+      .then((text) => {
+        if (cancelled) return;
+        const baseUrl = spriteVttUrl.substring(0, spriteVttUrl.lastIndexOf("/") + 1);
+        const entries: SpriteEntry[] = [];
+        const blocks = text.split(/\n\n+/);
+        for (const block of blocks) {
+          const lines = block.trim().split("\n");
+          const timeLine = lines.find((l) => l.includes("-->"));
+          const urlLine = lines.find((l) => l.includes("#xywh="));
+          if (!timeLine || !urlLine) continue;
+          const [startStr, endStr] = timeLine.split("-->").map((s) => s.trim());
+          const parseVttTime = (t: string) => {
+            const p = t.split(":");
+            return parseFloat(p[0]) * 3600 + parseFloat(p[1]) * 60 + parseFloat(p[2]);
+          };
+          const [file, frag] = urlLine.split("#xywh=");
+          const [x, y, w, h] = frag.split(",").map(Number);
+          entries.push({
+            start: parseVttTime(startStr),
+            end: parseVttTime(endStr),
+            url: file.startsWith("http") ? file : `${baseUrl}${file}`,
+            x, y, w, h,
+          });
+        }
+        setSprites(entries);
+      })
+      .catch(() => { if (!cancelled) setSprites([]); });
+    return () => { cancelled = true; };
+  }, [spriteVttUrl]);
+
+  const spriteForTime = useCallback(
+    (time: number): SpriteEntry | null => {
+      for (const s of sprites) {
+        if (time >= s.start && time < s.end) return s;
+      }
+      return sprites.length > 0 ? sprites[sprites.length - 1] : null;
+    },
+    [sprites],
+  );
 
   useEffect(() => {
     return () => {
@@ -474,6 +576,28 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       if (cancelled) return;
       setIsMediaReady(true);
       setIsBuffering(false);
+
+      if (!fpsDetectedRef.current && "requestVideoFrameCallback" in video) {
+        fpsDetectedRef.current = true;
+        let prevMedia: number | null = null;
+        const deltas: number[] = [];
+        const onFrame = (_now: DOMHighResTimeStamp, meta: { mediaTime: number }) => {
+          if (cancelled) return;
+          if (prevMedia !== null) {
+            const d = meta.mediaTime - prevMedia;
+            if (d > 0.001 && d < 0.2) deltas.push(d);
+          }
+          prevMedia = meta.mediaTime;
+          if (deltas.length >= 4) {
+            const avg = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+            const fps = Math.round(1 / avg);
+            if (fps >= 10 && fps <= 120) setDetectedFps(fps);
+          } else {
+            (video as any).requestVideoFrameCallback(onFrame);
+          }
+        };
+        (video as any).requestVideoFrameCallback(onFrame);
+      }
     };
 
     const handleCanPlay = () => {
@@ -528,6 +652,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       setQualityMenuOpen(false);
       setQualityOptions([]);
       setSelectedQualityLevel(AUTO_QUALITY_LEVEL);
+      setDetectedFps(null);
+      fpsDetectedRef.current = false;
 
       // Reset the element source before attaching a new one.
       video.removeAttribute("src");
@@ -710,12 +836,22 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
       {/* Timeline */}
       <div
         ref={trackRef}
-        className="relative mb-3 h-3 w-full cursor-pointer rounded-full border border-white/10 bg-white/10"
+        className="relative mb-1 h-3 w-full cursor-pointer rounded-full border border-white/10 bg-white/10"
         onPointerDown={(e) => {
           e.preventDefault();
           showControls();
           startScrub(e.clientX);
         }}
+        onPointerMove={(e) => {
+          if (isScrubbing) return;
+          const track = trackRef.current;
+          if (!track || !duration) return;
+          const rect = track.getBoundingClientRect();
+          const pct = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+          setHoverTime(pct * duration);
+          setHoverX(clamp(e.clientX - rect.left, 0, rect.width));
+        }}
+        onPointerLeave={() => { setHoverTime(null); }}
       >
         <div
           className="absolute inset-y-0 left-0 rounded-full bg-white/20"
@@ -726,18 +862,70 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           style={{ width: `${playedPercent * 100}%` }}
         />
 
-        {/* Comment markers */}
+        {/* Sprite thumbnail tooltip on hover or scrub */}
+        {(() => {
+          const previewTime = isScrubbing ? scrubTime : hoverTime;
+          if (previewTime === null) return null;
+          const sprite = spriteForTime(previewTime);
+          const thumbW = sprite?.w ?? 160;
+          const thumbH = sprite?.h ?? 90;
+          const trackW = trackRef.current?.clientWidth ?? 9999;
+          const previewX = isScrubbing
+            ? (duration > 0 ? (previewTime / duration) * trackW : 0)
+            : hoverX;
+          const tooltipLeft = clamp(previewX, thumbW / 2, trackW - thumbW / 2);
+          return (
+            <div
+              className="pointer-events-none absolute z-30"
+              style={{ left: tooltipLeft, bottom: 20, transform: "translateX(-50%)" }}
+            >
+              {sprite ? (
+                <div
+                  className="overflow-hidden rounded border border-white/20 shadow-lg"
+                  style={{
+                    width: thumbW,
+                    height: thumbH,
+                    backgroundImage: `url(${sprite.url})`,
+                    backgroundPosition: `-${sprite.x}px -${sprite.y}px`,
+                    backgroundSize: `${thumbW * 10}px auto`,
+                  }}
+                />
+              ) : null}
+              <div className="mt-1 text-center text-[10px] font-mono text-white/80">
+                {formatTimestamp(previewTime)}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Range comment fills on scrub bar */}
+        {duration > 0 && comments
+          .filter((c) => c.endTimestampSeconds !== undefined && c.endTimestampSeconds > c.timestampSeconds)
+          .map((c) => (
+            <div
+              key={`fill-${c._id}`}
+              className={cn(
+                "absolute inset-y-0 z-[5]",
+                c.resolved ? "bg-green-400/15" : "bg-orange-400/15",
+              )}
+              style={{
+                left: `${(c.timestampSeconds / duration) * 100}%`,
+                width: `${((c.endTimestampSeconds! - c.timestampSeconds) / duration) * 100}%`,
+              }}
+            />
+          ))}
+
+        {/* Comment ticks on scrub bar */}
         {groupedMarkers.map((marker) => {
-          const isResolved = marker.comment.resolved;
           const isActive = Math.abs(displayTime - marker.comment.timestampSeconds) < 1.5;
           return (
             <button
               key={marker.comment._id}
               type="button"
               className={cn(
-                "absolute top-1/2 z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/40 shadow",
-                isResolved ? "bg-green-400" : "bg-orange-400",
-                isActive && "ring-2 ring-white/60"
+                "absolute top-0 bottom-0 z-10 w-0.5 -translate-x-1/2",
+                marker.comment.resolved ? "bg-green-400/60" : "bg-orange-400/80",
+                isActive && "w-1 bg-orange-300"
               )}
               style={{ left: `${marker.position}%` }}
               onPointerDown={(e) => { e.stopPropagation(); }}
@@ -752,6 +940,93 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             />
           );
         })}
+        {/* End-point ticks for range comments */}
+        {comments
+          .filter((c) => c.endTimestampSeconds !== undefined && c.endTimestampSeconds > c.timestampSeconds && duration > 0)
+          .map((c) => (
+            <div
+              key={`end-${c._id}`}
+              className={cn(
+                "absolute top-0 bottom-0 z-10 w-0.5 -translate-x-1/2",
+                c.resolved ? "bg-green-400/60" : "bg-orange-400/80",
+              )}
+              style={{ left: `${(c.endTimestampSeconds! / duration) * 100}%` }}
+            />
+          ))}
+
+        {/* Range bar for in/out comments */}
+        {rangeMarker && duration > 0 && (
+          <>
+            <div
+              className="absolute inset-y-0 z-[8] bg-[#2d5a2d]/30 rounded-full"
+              style={{
+                left: `${(rangeMarker.inTime / duration) * 100}%`,
+                width: `${((rangeMarker.outTime - rangeMarker.inTime) / duration) * 100}%`,
+              }}
+            />
+            <div
+              className="absolute top-1/2 z-[15] h-5 w-2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-[#2d5a2d] bg-[#7cb87c] shadow"
+              style={{ left: `${(rangeMarker.inTime / duration) * 100}%` }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const onMove = (ev: PointerEvent) => {
+                  const t = getTimeFromClientX(ev.clientX);
+                  onRangeMarkerDrag?.("in", t);
+                };
+                const onUp = () => {
+                  window.removeEventListener("pointermove", onMove);
+                  window.removeEventListener("pointerup", onUp);
+                };
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp, { once: true });
+              }}
+              title="In point"
+            />
+            <div
+              className="absolute top-1/2 z-[15] h-5 w-2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-sm border border-[#2d5a2d] bg-[#7cb87c] shadow"
+              style={{ left: `${(rangeMarker.outTime / duration) * 100}%` }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                const onMove = (ev: PointerEvent) => {
+                  const t = getTimeFromClientX(ev.clientX);
+                  onRangeMarkerDrag?.("out", t);
+                };
+                const onUp = () => {
+                  window.removeEventListener("pointermove", onMove);
+                  window.removeEventListener("pointerup", onUp);
+                };
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp, { once: true });
+              }}
+              title="Out point"
+            />
+          </>
+        )}
+
+        {/* Editing marker (draggable diamond) */}
+        {editingMarker && duration > 0 && (
+          <div
+            className="absolute top-1/2 z-[15] h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-ew-resize border-2 border-[#2d5a2d] bg-[#7cb87c] shadow"
+            style={{ left: `${(editingMarker.timestampSeconds / duration) * 100}%` }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              const onMove = (ev: PointerEvent) => {
+                const t = getTimeFromClientX(ev.clientX);
+                onEditingMarkerDrag?.(t);
+              };
+              const onUp = () => {
+                window.removeEventListener("pointermove", onMove);
+                window.removeEventListener("pointerup", onUp);
+              };
+              window.addEventListener("pointermove", onMove);
+              window.addEventListener("pointerup", onUp, { once: true });
+            }}
+            title={`Edit timestamp: ${formatTimestamp(editingMarker.timestampSeconds)}`}
+          />
+        )}
 
         {/* Scrubber */}
         <div
@@ -759,6 +1034,82 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
           style={{ left: `${playedPercent * 100}%` }}
         />
       </div>
+
+      {/* Comment markers lane */}
+      {duration > 0 && comments.length > 0 && (
+        <div className="relative mb-2 h-3 w-full">
+          {comments.map((c) => {
+            const isRange = c.endTimestampSeconds !== undefined && c.endTimestampSeconds > c.timestampSeconds;
+            const isActive = Math.abs(displayTime - c.timestampSeconds) < 1.5;
+            const left = (c.timestampSeconds / duration) * 100;
+
+            if (isRange) {
+              const endLeft = (c.endTimestampSeconds! / duration) * 100;
+              const width = endLeft - left;
+              return (
+                <button
+                  key={c._id}
+                  type="button"
+                  className="absolute top-1/2 -translate-y-1/2 group"
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    applyTime(c.timestampSeconds);
+                    onMarkerClick?.(c);
+                    showControls();
+                  }}
+                  title={`${formatTimestamp(c.timestampSeconds)}–${formatTimestamp(c.endTimestampSeconds!)}`}
+                >
+                  {/* Bar */}
+                  <div className={cn(
+                    "absolute inset-x-0 top-1/2 -translate-y-1/2 h-1",
+                    c.resolved ? "bg-green-400/50" : "bg-orange-400/60",
+                    isActive && "h-1.5"
+                  )} />
+                  {/* In triangle ▶ */}
+                  <div
+                    className={cn(
+                      "absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2",
+                      c.resolved ? "text-green-400" : "text-orange-400",
+                    )}
+                    style={{ fontSize: 8, lineHeight: 1 }}
+                  >▶</div>
+                  {/* Out triangle ◀ */}
+                  <div
+                    className={cn(
+                      "absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2",
+                      c.resolved ? "text-green-400" : "text-orange-400",
+                    )}
+                    style={{ fontSize: 8, lineHeight: 1 }}
+                  >◀</div>
+                </button>
+              );
+            }
+
+            return (
+              <button
+                key={c._id}
+                type="button"
+                className={cn(
+                  "absolute top-1/2 z-10 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full",
+                  c.resolved ? "bg-green-400/70" : "bg-orange-400",
+                  isActive && "ring-1 ring-white/60 h-2.5 w-2.5"
+                )}
+                style={{ left: `${left}%` }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  applyTime(c.timestampSeconds);
+                  onMarkerClick?.(c);
+                  showControls();
+                }}
+                title={`Comment at ${formatTimestamp(c.timestampSeconds)}`}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Control row */}
       <div className="flex flex-wrap items-center gap-2 text-white">
@@ -964,6 +1315,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
             togglePlay();
             return;
           }
+          if (e.shiftKey && e.key === "ArrowLeft") {
+            e.preventDefault();
+            handleFrameStep(-1);
+            return;
+          }
+          if (e.shiftKey && e.key === "ArrowRight") {
+            e.preventDefault();
+            handleFrameStep(1);
+            return;
+          }
           if (e.key === "ArrowLeft") {
             e.preventDefault();
             handleSeekBy(-5);
@@ -1051,6 +1412,13 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(funct
         {isBuffering && isPlaying && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
             <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
+          </div>
+        )}
+
+        {/* Frame step indicator */}
+        {frameStepIndicator && (
+          <div className="pointer-events-none absolute top-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/70 px-3 py-1.5 text-xs font-mono font-medium text-white/90 backdrop-blur">
+            {frameStepIndicator}
           </div>
         )}
 

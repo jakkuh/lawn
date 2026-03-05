@@ -88,6 +88,7 @@ export const resolveContext = query({
       args.projectId === canonicalProjectId;
 
     return {
+      userSubject: user.subject,
       team: {
         ...team,
         role: membership.role,

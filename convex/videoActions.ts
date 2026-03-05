@@ -4,14 +4,16 @@ import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { v } from "convex/values";
-import { action, ActionCtx } from "./_generated/server";
+import { action, internalAction, ActionCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import {
@@ -182,12 +184,14 @@ function buildHlsPlaybackSession(
   hlsKey: string,
   thumbnailKey?: string | null,
   thumbnailUrl?: string | null,
-): { url: string; posterUrl: string } {
+  spriteVttKey?: string | null,
+): { url: string; posterUrl: string; spriteVttUrl?: string } {
   return {
     url: buildPublicContentUrl(hlsKey),
     posterUrl: thumbnailKey
       ? buildPublicContentUrl(thumbnailKey)
       : (thumbnailUrl ?? ""),
+    spriteVttUrl: spriteVttKey ? buildPublicContentUrl(spriteVttKey) : undefined,
   };
 }
 
@@ -529,11 +533,12 @@ export const getPlaybackSession = action({
   returns: v.object({
     url: v.string(),
     posterUrl: v.string(),
+    spriteVttUrl: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  ): Promise<{ url: string; posterUrl: string; spriteVttUrl?: string }> => {
     const video = await ctx.runQuery(api.videos.getVideoForPlayback, {
       videoId: args.videoId,
     });
@@ -543,7 +548,7 @@ export const getPlaybackSession = action({
     }
 
     if (video.hlsKey) {
-      return buildHlsPlaybackSession(video.hlsKey, video.thumbnailKey, video.thumbnailUrl);
+      return buildHlsPlaybackSession(video.hlsKey, video.thumbnailKey, video.thumbnailUrl, video.spriteVttKey);
     }
 
     if (!video.muxPlaybackId) {
@@ -623,11 +628,12 @@ export const getPublicPlaybackSession = action({
   returns: v.object({
     url: v.string(),
     posterUrl: v.string(),
+    spriteVttUrl: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  ): Promise<{ url: string; posterUrl: string; spriteVttUrl?: string }> => {
     const result = await ctx.runQuery(api.videos.getByPublicId, {
       publicId: args.publicId,
     });
@@ -637,7 +643,7 @@ export const getPublicPlaybackSession = action({
     }
 
     if (result.video.hlsKey) {
-      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl);
+      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl, result.video.spriteVttKey);
     }
 
     if (!result.video.muxPlaybackId) {
@@ -658,11 +664,12 @@ export const getSharedPlaybackSession = action({
   returns: v.object({
     url: v.string(),
     posterUrl: v.string(),
+    spriteVttUrl: v.optional(v.string()),
   }),
   handler: async (
     ctx,
     args,
-  ): Promise<{ url: string; posterUrl: string }> => {
+  ): Promise<{ url: string; posterUrl: string; spriteVttUrl?: string }> => {
     const result = await ctx.runQuery(api.videos.getByShareGrant, {
       grantToken: args.grantToken,
     });
@@ -672,7 +679,7 @@ export const getSharedPlaybackSession = action({
     }
 
     if (result.video.hlsKey) {
-      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl);
+      return buildHlsPlaybackSession(result.video.hlsKey, result.video.thumbnailKey, result.video.thumbnailUrl, result.video.spriteVttKey);
     }
 
     if (!result.video.muxPlaybackId) {
@@ -723,5 +730,43 @@ export const getDownloadUrl = action({
       }),
       filename,
     };
+  },
+});
+
+async function deleteAllObjectsWithPrefix(prefix: string) {
+  const s3 = getS3Client();
+  let continuationToken: string | undefined;
+  do {
+    const list = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        Prefix: prefix,
+        MaxKeys: 1000,
+        ContinuationToken: continuationToken,
+      }),
+    );
+    const objects = list.Contents;
+    if (objects && objects.length > 0) {
+      await s3.send(
+        new DeleteObjectsCommand({
+          Bucket: BUCKET_NAME,
+          Delete: {
+            Objects: objects.map((o) => ({ Key: o.Key! })),
+            Quiet: true,
+          },
+        }),
+      );
+    }
+    continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (continuationToken);
+}
+
+export const purgeVideoFiles = internalAction({
+  args: { videoId: v.string() },
+  returns: v.null(),
+  handler: async (_ctx, args) => {
+    const prefix = `videos/${args.videoId}/`;
+    await deleteAllObjectsWithPrefix(prefix);
+    return null;
   },
 });

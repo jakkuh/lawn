@@ -147,6 +147,7 @@ export const completeJob = internalMutation({
     jobId: v.id("transcodeJobs"),
     hlsKey: v.string(),
     thumbnailKey: v.optional(v.string()),
+    spriteVttKey: v.optional(v.string()),
     duration: v.optional(v.number()),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
@@ -172,6 +173,7 @@ export const completeJob = internalMutation({
     };
     if (args.thumbnailKey) patch.thumbnailKey = args.thumbnailKey;
     if (thumbnailUrl) patch.thumbnailUrl = thumbnailUrl;
+    if (args.spriteVttKey) patch.spriteVttKey = args.spriteVttKey;
     if (args.duration !== undefined) patch.duration = args.duration;
 
     await ctx.db.patch(job.videoId, patch);

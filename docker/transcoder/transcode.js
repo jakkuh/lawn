@@ -43,7 +43,8 @@ async function pMap(items, fn, concurrency = 8) {
 function contentTypeForFile(name) {
   if (name.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
   if (name.endsWith(".ts")) return "video/MP2T";
-  if (name.endsWith(".jpg")) return "image/jpeg";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".vtt")) return "text/vtt";
   return "application/octet-stream";
 }
 
@@ -272,6 +273,74 @@ export async function generateThumbnail(inputPath, outputPath, hwAccel) {
     outputPath,
   );
   await execFileAsync("ffmpeg", args);
+}
+
+const SPRITE_INTERVAL = 1;
+const SPRITE_COLS = 10;
+const SPRITE_ROWS = 10;
+const SPRITE_THUMB_WIDTH = 240;
+
+export async function generateSpriteSheet(inputPath, outputDir, duration, hwAccel, sourceWidth, sourceHeight) {
+  await mkdir(outputDir, { recursive: true });
+
+  const totalFrames = Math.ceil(duration / SPRITE_INTERVAL);
+  const framesPerSheet = SPRITE_COLS * SPRITE_ROWS;
+  const sheetCount = Math.ceil(totalFrames / framesPerSheet);
+
+  // Match FFmpeg's even-number rounding for the actual tile dimensions
+  const rawHeight = Math.round((SPRITE_THUMB_WIDTH * sourceHeight) / sourceWidth);
+  const thumbHeight = rawHeight % 2 === 0 ? rawHeight : rawHeight + 1;
+
+  const vttLines = ["WEBVTT", ""];
+  let frameIndex = 0;
+
+  for (let sheet = 0; sheet < sheetCount; sheet++) {
+    const framesThisSheet = Math.min(framesPerSheet, totalFrames - sheet * framesPerSheet);
+    const cols = Math.min(SPRITE_COLS, framesThisSheet);
+    const rows = Math.ceil(framesThisSheet / SPRITE_COLS);
+    const sheetFile = `sprite_${sheet}.jpg`;
+    const outputPath = join(outputDir, sheetFile);
+
+    const args = ["-y"];
+    if (hwAccel === "nvidia") args.push("-hwaccel", "cuda");
+
+    const startTime = sheet * framesPerSheet * SPRITE_INTERVAL;
+    const sheetDuration = framesThisSheet * SPRITE_INTERVAL;
+    args.push(
+      "-ss", String(startTime),
+      "-t", String(sheetDuration),
+      "-i", inputPath,
+      "-vf", `fps=1/${SPRITE_INTERVAL},scale=${SPRITE_THUMB_WIDTH}:${thumbHeight},tile=${cols}x${rows}`,
+      "-q:v", "5",
+      outputPath,
+    );
+    await execFileAsync("ffmpeg", args, { maxBuffer: 50 * 1024 * 1024, timeout: 0 });
+
+    for (let i = 0; i < framesThisSheet; i++) {
+      const col = i % SPRITE_COLS;
+      const row = Math.floor(i / SPRITE_COLS);
+      const x = col * SPRITE_THUMB_WIDTH;
+      const y = row * thumbHeight;
+      const ts = frameIndex * SPRITE_INTERVAL;
+      const tsEnd = Math.min(ts + SPRITE_INTERVAL, duration);
+
+      const fmt = (s) => {
+        const h = String(Math.floor(s / 3600)).padStart(2, "0");
+        const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+        const sec = (s % 60).toFixed(3).padStart(6, "0");
+        return `${h}:${m}:${sec}`;
+      };
+
+      vttLines.push(`${fmt(ts)} --> ${fmt(tsEnd)}`);
+      vttLines.push(`${sheetFile}#xywh=${x},${y},${SPRITE_THUMB_WIDTH},${thumbHeight}`);
+      vttLines.push("");
+      frameIndex++;
+    }
+  }
+
+  const vttPath = join(outputDir, "sprites.vtt");
+  await writeFile(vttPath, vttLines.join("\n"));
+  return vttPath;
 }
 
 export function buildMasterPlaylist(tiers, probeInfo) {

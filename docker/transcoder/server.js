@@ -9,6 +9,7 @@ import {
   selectTiers,
   transcodeTier,
   generateThumbnail,
+  generateSpriteSheet,
   uploadFile,
   uploadDir,
   tierExistsInS3,
@@ -133,11 +134,18 @@ async function processJob(job) {
 
     const hlsPrefix = `videos/${job.videoId}/hls`;
     const thumbKey = `videos/${job.videoId}/thumbnail.jpg`;
+    const spritesPrefix = `videos/${job.videoId}/sprites`;
+    const spriteDir = join(workDir, "sprites");
 
     log(`[${job.videoId}] Generating thumbnail...`);
     await generateThumbnail(inputPath, thumbPath, HW_ACCEL);
     await uploadFile(s3, job.bucket, thumbKey, thumbPath, "image/jpeg");
     log(`[${job.videoId}] Thumbnail uploaded.`);
+
+    log(`[${job.videoId}] Generating sprite sheets...`);
+    await generateSpriteSheet(inputPath, spriteDir, probeInfo.duration, HW_ACCEL, probeInfo.width, probeInfo.height);
+    await uploadDir(s3, job.bucket, spritesPrefix, spriteDir);
+    log(`[${job.videoId}] Sprite sheets uploaded.`);
 
     let pendingUpload = null;
     for (const tier of tiers) {
@@ -187,6 +195,7 @@ async function processJob(job) {
     await reportComplete(job.id, {
       hlsKey: `${hlsPrefix}/master.m3u8`,
       thumbnailKey: thumbKey,
+      spriteVttKey: `${spritesPrefix}/sprites.vtt`,
       duration: probeInfo.duration,
       width: probeInfo.width,
       height: probeInfo.height,

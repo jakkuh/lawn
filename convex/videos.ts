@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, mutation, query, MutationCtx } from "./_generated/server";
 import { identityName, requireProjectAccess, requireVideoAccess } from "./auth";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { generateUniqueToken } from "./security";
 import { resolveActiveShareGrant } from "./shareAccess";
 import { assertTeamCanStoreBytes } from "./billingHelpers";
@@ -146,6 +147,7 @@ export const getByPublicId = query({
         muxPlaybackId: video.muxPlaybackId,
         hlsKey: video.hlsKey,
         thumbnailKey: video.thumbnailKey,
+        spriteVttKey: video.spriteVttKey,
         contentType: video.contentType,
         s3Key: video.s3Key,
       },
@@ -195,6 +197,7 @@ export const getByShareGrant = query({
         muxPlaybackId: video.muxPlaybackId,
         hlsKey: video.hlsKey,
         thumbnailKey: video.thumbnailKey,
+        spriteVttKey: video.spriteVttKey,
         contentType: video.contentType,
         s3Key: video.s3Key,
       },
@@ -252,35 +255,42 @@ export const remove = mutation({
   args: { videoId: v.id("videos") },
   handler: async (ctx, args) => {
     await requireVideoAccess(ctx, args.videoId, "admin");
-
-    const comments = await ctx.db
-      .query("comments")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const comment of comments) {
-      await ctx.db.delete(comment._id);
-    }
-
-    const shareLinks = await ctx.db
-      .query("shareLinks")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const link of shareLinks) {
-      await deleteShareAccessGrantsForLink(ctx, link._id);
-      await ctx.db.delete(link._id);
-    }
-
-    const transcodeJobs = await ctx.db
-      .query("transcodeJobs")
-      .withIndex("by_video", (q) => q.eq("videoId", args.videoId))
-      .collect();
-    for (const job of transcodeJobs) {
-      await ctx.db.delete(job._id);
-    }
-
-    await ctx.db.delete(args.videoId);
+    await purgeAndDeleteVideo(ctx, args.videoId);
   },
 });
+
+export async function purgeAndDeleteVideo(ctx: MutationCtx, videoId: Id<"videos">) {
+  await ctx.scheduler.runAfter(0, internal.videoActions.purgeVideoFiles, {
+    videoId: videoId as string,
+  });
+
+  const comments = await ctx.db
+    .query("comments")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const comment of comments) {
+    await ctx.db.delete(comment._id);
+  }
+
+  const shareLinks = await ctx.db
+    .query("shareLinks")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const link of shareLinks) {
+    await deleteShareAccessGrantsForLink(ctx, link._id);
+    await ctx.db.delete(link._id);
+  }
+
+  const transcodeJobs = await ctx.db
+    .query("transcodeJobs")
+    .withIndex("by_video", (q) => q.eq("videoId", videoId))
+    .collect();
+  for (const job of transcodeJobs) {
+    await ctx.db.delete(job._id);
+  }
+
+  await ctx.db.delete(videoId);
+}
 
 export const setUploadInfo = internalMutation({
   args: {

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getUser, requireTeamAccess, requireProjectAccess } from "./auth";
 import { assertTeamHasActiveSubscription } from "./billingHelpers";
+import { purgeAndDeleteVideo } from "./videos";
 
 export const create = mutation({
   args: {
@@ -127,39 +128,13 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     await requireProjectAccess(ctx, args.projectId, "admin");
 
-    // Delete all videos in the project
     const videos = await ctx.db
       .query("videos")
       .withIndex("by_project", (q) => q.eq("projectId", args.projectId))
       .collect();
 
     for (const video of videos) {
-      // Delete comments
-      const comments = await ctx.db
-        .query("comments")
-        .withIndex("by_video", (q) => q.eq("videoId", video._id))
-        .collect();
-      for (const comment of comments) {
-        await ctx.db.delete(comment._id);
-      }
-
-      // Delete share links
-      const shareLinks = await ctx.db
-        .query("shareLinks")
-        .withIndex("by_video", (q) => q.eq("videoId", video._id))
-        .collect();
-      for (const link of shareLinks) {
-        const grants = await ctx.db
-          .query("shareAccessGrants")
-          .withIndex("by_share_link", (q) => q.eq("shareLinkId", link._id))
-          .collect();
-        for (const grant of grants) {
-          await ctx.db.delete(grant._id);
-        }
-        await ctx.db.delete(link._id);
-      }
-
-      await ctx.db.delete(video._id);
+      await purgeAndDeleteVideo(ctx, video._id);
     }
 
     await ctx.db.delete(args.projectId);

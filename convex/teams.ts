@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { getUser, identityAvatarUrl, identityEmail, identityName, requireUser, requireTeamAccess } from "./auth";
 import { getTeamSubscriptionState } from "./billingHelpers";
+import { purgeAndDeleteVideo } from "./videos";
 
 function normalizedEmail(value: string) {
   return value.trim().toLowerCase();
@@ -417,7 +418,6 @@ export const deleteTeam = mutation({
       await ctx.db.delete(invite._id);
     }
 
-    // Delete all projects and their videos/comments
     const projects = await ctx.db
       .query("projects")
       .withIndex("by_team", (q) => q.eq("teamId", args.teamId))
@@ -430,32 +430,7 @@ export const deleteTeam = mutation({
         .collect();
 
       for (const video of videos) {
-        // Delete comments
-        const comments = await ctx.db
-          .query("comments")
-          .withIndex("by_video", (q) => q.eq("videoId", video._id))
-          .collect();
-        for (const comment of comments) {
-          await ctx.db.delete(comment._id);
-        }
-
-        // Delete share links
-        const shareLinks = await ctx.db
-          .query("shareLinks")
-          .withIndex("by_video", (q) => q.eq("videoId", video._id))
-          .collect();
-        for (const link of shareLinks) {
-          const grants = await ctx.db
-            .query("shareAccessGrants")
-            .withIndex("by_share_link", (q) => q.eq("shareLinkId", link._id))
-            .collect();
-          for (const grant of grants) {
-            await ctx.db.delete(grant._id);
-          }
-          await ctx.db.delete(link._id);
-        }
-
-        await ctx.db.delete(video._id);
+        await purgeAndDeleteVideo(ctx, video._id);
       }
 
       await ctx.db.delete(project._id);

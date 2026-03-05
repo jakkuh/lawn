@@ -33,7 +33,10 @@ services:
         condition: service_healthy
 
   transcoder:
-    build: ./docker/transcoder
+    build:
+      context: ./docker/transcoder
+      args:
+        BASE: ${TRANSCODER_BASE:-cpu}
     ports:
       - "3300:3300"
     environment:
@@ -43,23 +46,16 @@ services:
       - S3_ACCESS_KEY_ID=${RAILWAY_ACCESS_KEY_ID:-minioadmin}
       - S3_SECRET_ACCESS_KEY=${RAILWAY_SECRET_ACCESS_KEY:-minioadmin}
       - S3_REGION=${RAILWAY_REGION:-us-east-1}
-      - HW_ACCEL=cpu
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # ── NVIDIA GPU (replace the build + environment above) ──
-    # build:
-    #   context: ./docker/transcoder
-    #   dockerfile: Dockerfile.nvidia
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
-    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-    #   - CONVEX_URL=http://host.docker.internal:3211
-    #   - TRANSCODER_SECRET=${TRANSCODER_WEBHOOK_SECRET:-lawn-transcode-secret}
-    #   - S3_ENDPOINT=${RAILWAY_ENDPOINT:-http://host.docker.internal:9000}
-    #   - S3_ACCESS_KEY_ID=${RAILWAY_ACCESS_KEY_ID:-minioadmin}
-    #   - S3_SECRET_ACCESS_KEY=${RAILWAY_SECRET_ACCESS_KEY:-minioadmin}
-    #   - S3_REGION=${RAILWAY_REGION:-us-east-1}
-    #   - HW_ACCEL=nvidia
+    # For NVIDIA GPU, set TRANSCODER_BASE=nvidia in .env and uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]
 
 volumes:
   convex-data:

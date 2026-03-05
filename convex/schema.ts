@@ -87,6 +87,7 @@ export default defineSchema({
     // Self-hosted HLS transcode output
     hlsKey: v.optional(v.string()),
     thumbnailKey: v.optional(v.string()),
+    spriteVttKey: v.optional(v.string()),
     // Metadata
     s3Key: v.optional(v.string()),
     duration: v.optional(v.number()),
@@ -119,6 +120,8 @@ export default defineSchema({
     userAvatarUrl: v.optional(v.string()),
     text: v.string(),
     timestampSeconds: v.number(),
+    endTimestampSeconds: v.optional(v.number()),
+    drawingData: v.optional(v.string()),
     parentId: v.optional(v.id("comments")),
     resolved: v.boolean(),
   })

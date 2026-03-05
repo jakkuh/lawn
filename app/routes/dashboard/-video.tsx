@@ -2,11 +2,13 @@
 import { useConvex, useMutation, useAction } from "convex/react";
 import { api } from "@convex/_generated/api";
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { VideoPlayer, type VideoPlayerHandle } from "@/components/video-player/VideoPlayer";
+import { DrawingCanvas, type DrawingCanvasHandle, type DrawingTool } from "@/components/video-player/DrawingCanvas";
+import { DrawingToolbar } from "@/components/video-player/DrawingToolbar";
 import { CommentList } from "@/components/comments/CommentList";
 import { CommentInput } from "@/components/comments/CommentInput";
 import { ShareDialog } from "@/components/ShareDialog";
@@ -76,12 +78,27 @@ export default function VideoPage() {
   const [playbackSession, setPlaybackSession] = useState<{
     url: string;
     posterUrl: string;
+    spriteVttUrl?: string;
   } | null>(null);
   const [isLoadingPlayback, setIsLoadingPlayback] = useState(false);
   const [originalPlaybackUrl, setOriginalPlaybackUrl] = useState<string | null>(null);
   const [isLoadingOriginalPlayback, setIsLoadingOriginalPlayback] = useState(false);
   const [preferredSource, setPreferredSource] = useState<"mux720" | "original" | null>(null);
+  const [rangeMarker, setRangeMarker] = useState<{ inTime: number; outTime: number } | null>(null);
+  const [visibleCommentIds, setVisibleCommentIds] = useState<Set<string>>(new Set());
+  const [drawingMode, setDrawingMode] = useState(false);
+  const [drawingData, setDrawingData] = useState<string | null>(null);
+  const [drawingTool, setDrawingTool] = useState<DrawingTool>("pen");
+  const [drawingColor, setDrawingColor] = useState("#ef4444");
+  const drawingCanvasRef = useRef<DrawingCanvasHandle | null>(null);
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+
+  const timelineComments = useMemo(() => {
+    if (!comments) return [];
+    if (visibleCommentIds.size === 0) return comments;
+    return comments.filter((c) => visibleCommentIds.has(c._id as string));
+  }, [comments, visibleCommentIds]);
+
   const isPlayable = video?.status === "ready" && (Boolean(video?.muxPlaybackId) || Boolean(video?.hlsKey));
   const playbackUrl = playbackSession?.url ?? null;
   const effectiveSource = preferredSource
@@ -396,42 +413,77 @@ export default function VideoPage() {
           ) : null}
 
           {activePlaybackUrl ? (
-            <VideoPlayer
-              ref={playerRef}
-              src={activePlaybackUrl}
-              poster={playbackSession?.posterUrl}
-              comments={comments || []}
-              onTimeUpdate={handleTimeUpdate}
-              onMarkerClick={handleMarkerClick}
-              allowDownload={video.status === "ready"}
-              downloadFilename={`${video.title}.mp4`}
-              onRequestDownload={requestDownload}
-              controlsBelow
-              qualityOptionsConfig={[
-                ...(video?.hlsKey
-                  ? activeQualityId !== "mux720"
-                    ? [{ id: "mux720", label: "Adaptive", disabled: !playbackUrl }]
-                    : []
-                  : [
-                      {
-                        id: "mux720",
-                        label: playbackUrl ? "720p" : "720p (encoding...)",
-                        disabled: !playbackUrl,
-                      },
-                    ]),
-                {
-                  id: "original",
-                  label: "Original",
-                  disabled: !originalPlaybackUrl,
-                },
-              ]}
-              selectedQualityId={activeQualityId}
-              onSelectQuality={(id) => {
-                if (id === "mux720" || id === "original") {
-                  setPreferredSource(id);
-                }
-              }}
-            />
+            <div className="relative flex-1 min-h-0">
+              <VideoPlayer
+                ref={playerRef}
+                src={activePlaybackUrl}
+                poster={playbackSession?.posterUrl}
+                spriteVttUrl={playbackSession?.spriteVttUrl}
+                comments={timelineComments}
+                onTimeUpdate={handleTimeUpdate}
+                onMarkerClick={handleMarkerClick}
+                allowDownload={video.status === "ready"}
+                downloadFilename={`${video.title}.mp4`}
+                onRequestDownload={requestDownload}
+                controlsBelow
+                rangeMarker={rangeMarker ?? undefined}
+                onRangeMarkerDrag={(handle, time) => {
+                  setRangeMarker((prev) => prev ? {
+                    inTime: handle === "in" ? time : prev.inTime,
+                    outTime: handle === "out" ? time : prev.outTime,
+                  } : null);
+                }}
+                qualityOptionsConfig={[
+                  ...(video?.hlsKey
+                    ? activeQualityId !== "mux720"
+                      ? [{ id: "mux720", label: "Adaptive", disabled: !playbackUrl }]
+                      : []
+                    : [
+                        {
+                          id: "mux720",
+                          label: playbackUrl ? "720p" : "720p (encoding...)",
+                          disabled: !playbackUrl,
+                        },
+                      ]),
+                  {
+                    id: "original",
+                    label: "Original",
+                    disabled: !originalPlaybackUrl,
+                  },
+                ]}
+                selectedQualityId={activeQualityId}
+                onSelectQuality={(id) => {
+                  if (id === "mux720" || id === "original") {
+                    setPreferredSource(id);
+                  }
+                }}
+              />
+              {drawingMode && (
+                <>
+                  <DrawingCanvas
+                    ref={drawingCanvasRef}
+                    tool={drawingTool}
+                    color={drawingColor}
+                    lineWidth={3}
+                    active
+                    className="z-30"
+                  />
+                  <DrawingToolbar
+                    tool={drawingTool}
+                    color={drawingColor}
+                    onToolChange={setDrawingTool}
+                    onColorChange={setDrawingColor}
+                    onUndo={() => drawingCanvasRef.current?.undo()}
+                    onClear={() => drawingCanvasRef.current?.clear()}
+                    onDone={() => {
+                      const data = drawingCanvasRef.current?.toDataURL() ?? null;
+                      setDrawingData(data);
+                      setDrawingMode(false);
+                    }}
+                  />
+                </>
+              )}
+            </div>
           ) : (
             <div className="flex-1 flex items-center justify-center">
               {video.status === "ready" && !playbackUrl ? (
@@ -478,9 +530,11 @@ export default function VideoPage() {
             <CommentList
               videoId={resolvedVideoId}
               comments={commentsThreaded}
+              currentUserClerkId={context?.userSubject}
               onTimestampClick={handleTimestampClick}
               highlightedCommentId={highlightedCommentId}
               canResolve={canEdit}
+              onVisibleIdsChange={setVisibleCommentIds}
             />
           </div>
           {canComment && (
@@ -490,6 +544,9 @@ export default function VideoPage() {
                 timestampSeconds={currentTime}
                 showTimestamp
                 variant="seamless"
+                onRangeChange={setRangeMarker}
+                onDrawingRequest={() => setDrawingMode(true)}
+                drawingData={drawingData}
               />
             </div>
           )}
@@ -521,12 +578,14 @@ export default function VideoPage() {
             <CommentList
               videoId={resolvedVideoId}
               comments={commentsThreaded}
+              currentUserClerkId={context?.userSubject}
               onTimestampClick={(time) => {
                 handleTimestampClick(time);
                 setMobileCommentsOpen(false);
               }}
               highlightedCommentId={highlightedCommentId}
               canResolve={canEdit}
+              onVisibleIdsChange={setVisibleCommentIds}
             />
           </div>
           {canComment && (
@@ -536,6 +595,9 @@ export default function VideoPage() {
                 timestampSeconds={currentTime}
                 showTimestamp
                 variant="seamless"
+                onRangeChange={setRangeMarker}
+                onDrawingRequest={() => setDrawingMode(true)}
+                drawingData={drawingData}
               />
             </div>
           )}

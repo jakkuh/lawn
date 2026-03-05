@@ -80,6 +80,8 @@ export const create = mutation({
     videoId: v.id("videos"),
     text: v.string(),
     timestampSeconds: v.number(),
+    endTimestampSeconds: v.optional(v.number()),
+    drawingData: v.optional(v.string()),
     parentId: v.optional(v.id("comments")),
   },
   handler: async (ctx, args) => {
@@ -99,6 +101,8 @@ export const create = mutation({
       userAvatarUrl: identityAvatarUrl(user),
       text: args.text,
       timestampSeconds: args.timestampSeconds,
+      endTimestampSeconds: args.endTimestampSeconds,
+      drawingData: args.drawingData,
       parentId: args.parentId,
       resolved: false,
     });
@@ -110,6 +114,8 @@ export const createForPublic = mutation({
     publicId: v.string(),
     text: v.string(),
     timestampSeconds: v.number(),
+    endTimestampSeconds: v.optional(v.number()),
+    drawingData: v.optional(v.string()),
     parentId: v.optional(v.id("comments")),
   },
   handler: async (ctx, args) => {
@@ -134,6 +140,8 @@ export const createForPublic = mutation({
       userAvatarUrl: identityAvatarUrl(user),
       text: args.text,
       timestampSeconds: args.timestampSeconds,
+      endTimestampSeconds: args.endTimestampSeconds,
+      drawingData: args.drawingData,
       parentId: args.parentId,
       resolved: false,
     });
@@ -145,6 +153,8 @@ export const createForShareGrant = mutation({
     grantToken: v.string(),
     text: v.string(),
     timestampSeconds: v.number(),
+    endTimestampSeconds: v.optional(v.number()),
+    drawingData: v.optional(v.string()),
     parentId: v.optional(v.id("comments")),
   },
   handler: async (ctx, args) => {
@@ -174,6 +184,8 @@ export const createForShareGrant = mutation({
       userAvatarUrl: identityAvatarUrl(user),
       text: args.text,
       timestampSeconds: args.timestampSeconds,
+      endTimestampSeconds: args.endTimestampSeconds,
+      drawingData: args.drawingData,
       parentId: args.parentId,
       resolved: false,
     });
@@ -183,7 +195,10 @@ export const createForShareGrant = mutation({
 export const update = mutation({
   args: {
     commentId: v.id("comments"),
-    text: v.string(),
+    text: v.optional(v.string()),
+    timestampSeconds: v.optional(v.number()),
+    endTimestampSeconds: v.optional(v.number()),
+    drawingData: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -195,7 +210,15 @@ export const update = mutation({
       throw new Error("You can only edit your own comments");
     }
 
-    await ctx.db.patch(args.commentId, { text: args.text });
+    const patch: Record<string, unknown> = {};
+    if (args.text !== undefined) patch.text = args.text;
+    if (args.timestampSeconds !== undefined) patch.timestampSeconds = args.timestampSeconds;
+    if (args.endTimestampSeconds !== undefined) patch.endTimestampSeconds = args.endTimestampSeconds;
+    if (args.drawingData !== undefined) patch.drawingData = args.drawingData;
+
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(args.commentId, patch);
+    }
   },
 });
 
